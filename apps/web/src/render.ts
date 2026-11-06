@@ -1,11 +1,12 @@
 import horseUrl from './assets/horse.gif?url';
 import type { CrawlSnapshot } from '@akl/graph-contract';
 import type { DisposableScope } from '@akl/lab-kit';
-import { pageHref, visitedHistory, type SiteFixture } from './data.ts';
+import { pageHref, visitedHistory, type PageRecord, type SiteFixture } from './data.ts';
 import { createCardSpace } from './card-space.ts';
+import { inspectPreviewTarget, type PreviewMetadata } from './preview-api.ts';
 export interface FrontendView { begin(fixture: SiteFixture): void; update(snapshot: CrawlSnapshot): void; setStatus?(message: string): void; setLoading?(loading: boolean): void; append?(fixture: SiteFixture, anchorId: string): void }
 export function createFrontend(container: HTMLElement, scope: DisposableScope,
-  onSearch: (query: string) => void, initialQuery = '', onContinue?: (nodeId: string) => void, onReturnToSearch?: () => void): FrontendView {
+  onSearch: (query: string) => void, initialQuery = '', onContinue?: (nodeId: string) => void, onReturnToSearch?: () => void, apiEndpoint = ''): FrontendView {
   container.innerHTML = `<main class="stack-app" data-phase="entry">
     <button type="button" class="return-to-search" aria-label="검색어 입력 화면으로 돌아가기"><span aria-hidden="true"></span></button>
     <div class="relevance-legend" aria-label="검색어 연관도 색상표">
@@ -45,10 +46,72 @@ export function createFrontend(container: HTMLElement, scope: DisposableScope,
   const preview = container.querySelector<HTMLElement>('.page-preview')!;
   const frameHost = preview.querySelector<HTMLElement>('.preview-frame')!;
   const original = preview.querySelector<HTMLAnchorElement>('a')!;
+  let previewAbort: AbortController | null = null;
   function closePreview() {
+    previewAbort?.abort();
+    previewAbort = null;
     const frame = frameHost.querySelector('iframe');
     if (frame) { frame.src = 'about:blank'; frame.remove(); }
+    frameHost.replaceChildren();
     preview.hidden = true;
+  }
+  function renderFallbackCard(page: PageRecord, targetUrl: string, meta?: PreviewMetadata) {
+    const card = document.createElement('article');
+    card.className = 'preview-fallback';
+    const header = document.createElement('header');
+    header.className = 'preview-fallback-header';
+    let hostLabel = page.node.domain;
+    try { hostLabel = new URL(targetUrl).hostname || hostLabel; } catch { /* keep node domain */ }
+    const domainEl = document.createElement('span');
+    domainEl.className = 'preview-fallback-domain';
+    domainEl.textContent = meta?.siteName ? `${meta.siteName} · ${hostLabel}` : hostLabel;
+    const noticeEl = document.createElement('span');
+    noticeEl.className = 'preview-fallback-notice';
+    noticeEl.textContent = '외부 사이트 보안 정책으로 요약 미리보기를 표시합니다';
+    header.append(domainEl, noticeEl);
+
+    const body = document.createElement('div');
+    body.className = 'preview-fallback-body';
+    const imageUrl = meta?.image || page.node.content?.imageUrl || '';
+    if (imageUrl) {
+      const media = document.createElement('div');
+      media.className = 'preview-fallback-media';
+      const img = document.createElement('img');
+      img.src = imageUrl;
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.addEventListener('error', () => media.remove(), { once: true });
+      media.append(img);
+      body.append(media);
+    }
+    const copyWrap = document.createElement('div');
+    copyWrap.className = 'preview-fallback-copy';
+    const heading = document.createElement('h2');
+    heading.textContent = meta?.title || page.node.content?.title || hostLabel;
+    const descText = meta?.description || page.node.content?.snippet || '';
+    const desc = document.createElement('p');
+    desc.textContent = descText || '제공된 본문 요약이 없습니다. 아래 링크에서 원문 전체를 확인하실 수 있습니다.';
+    const urlLine = document.createElement('p');
+    urlLine.className = 'preview-fallback-url';
+    urlLine.textContent = targetUrl;
+    const openLink = document.createElement('a');
+    openLink.className = 'preview-fallback-open';
+    openLink.href = targetUrl;
+    openLink.target = '_blank';
+    openLink.rel = 'noopener noreferrer';
+    openLink.textContent = '원문 페이지 새 탭에서 열기 ↗';
+    copyWrap.append(heading, desc, urlLine, openLink);
+    body.append(copyWrap);
+    card.append(header, body);
+    frameHost.replaceChildren(card);
+  }
+  function mountIframe(src: string, titleText: string, sandbox: string) {
+    const frame = document.createElement('iframe');
+    frame.title = titleText;
+    frame.referrerPolicy = 'no-referrer';
+    frame.setAttribute('sandbox', sandbox);
+    frame.src = src;
+    frameHost.replaceChildren(frame);
   }
   scope.add(closePreview);
   const list = container.querySelector<HTMLOListElement>('.history-list')!;
@@ -83,14 +146,54 @@ export function createFrontend(container: HTMLElement, scope: DisposableScope,
   const space = createCardSpace(stage, scope, (id) => {
     const page = fixture?.pages.find((item) => item.node.id === id);
     if (!page) return;
-    selectedId = id; space.focus(id); detail.querySelector('p')!.textContent = page.node.content?.title ?? page.node.domain;
+    selectedId = id; space.focus(id);
+    const titleText = page.node.content?.title ?? page.node.domain;
+    detail.querySelector('p')!.textContent = titleText;
     closePreview();
-    const frame = document.createElement('iframe');
-    frame.title = page.node.content?.title ?? page.node.domain;
-    frame.referrerPolicy = 'no-referrer';
-    frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
-    frame.src = page.href; frameHost.append(frame); original.href = page.href; preview.hidden = false;
+    original.href = page.href;
+    preview.hidden = false;
     detail.hidden = false;
+
+    if (!apiEndpoint.trim()) {
+      if (/^(?:www\.)?google\./i.test(new URL(page.href, 'http://localhost').hostname)) {
+        renderFallbackCard(page, page.href);
+      } else {
+        mountIframe(page.href, titleText, 'allow-scripts allow-same-origin allow-forms allow-popups');
+      }
+      return;
+    }
+
+    const loadingNotice = document.createElement('div');
+    loadingNotice.className = 'preview-loading';
+    loadingNotice.textContent = '미리보기를 불러오는 중입니다…';
+    frameHost.replaceChildren(loadingNotice);
+
+    const controller = new AbortController();
+    previewAbort = controller;
+    void inspectPreviewTarget(apiEndpoint, page.href, controller.signal)
+      .then((inspection) => {
+        if (controller.signal.aborted || previewAbort !== controller) return;
+        const resolvedHref = inspection.finalUrl || page.href;
+        page.href = resolvedHref;
+        original.href = resolvedHref;
+        const cardAnchor = stage.querySelector<HTMLAnchorElement>(`[data-page-id="${CSS.escape(id)}"] a`);
+        if (cardAnchor) {
+          cardAnchor.href = resolvedHref;
+          cardAnchor.textContent = resolvedHref;
+          cardAnchor.title = resolvedHref;
+        }
+        if (inspection.mode === 'iframe' && inspection.embedUrl) {
+          mountIframe(inspection.embedUrl, titleText, 'allow-scripts allow-same-origin allow-forms allow-popups');
+        } else if (inspection.mode === 'proxy' && inspection.embedUrl) {
+          mountIframe(inspection.embedUrl, titleText, 'allow-popups allow-popups-to-escape-sandbox');
+        } else {
+          renderFallbackCard(page, resolvedHref, inspection.meta);
+        }
+      })
+      .catch(() => {
+        if (controller.signal.aborted || previewAbort !== controller) return;
+        renderFallbackCard(page, page.href);
+      });
   });
   scope.trackListener(container.querySelector('.return-to-search')!, 'click', () => {
     onReturnToSearch?.(); setLoading(false); closePreview(); space.reset();

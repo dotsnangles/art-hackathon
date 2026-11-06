@@ -3,6 +3,11 @@ import { pathToFileURL } from 'node:url';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, extname } from 'node:path';
 import { DEFAULT_LLM_PROVIDER, LLM_PROVIDERS, QueryGenerationError, generateQueries } from './llm.js';
+import {
+  UnsafeUrlError,
+  inspectOrRenderPreview,
+  unwrapDirectGoogleRedirectParam,
+} from './preview.js';
 
 const COUNT_PARAMETERS = {
   goodCount: { defaultValue: 30, max: 100 },
@@ -72,6 +77,7 @@ export async function search(query, {
   awesomeQueryCount = COUNT_PARAMETERS.awesomeQueryCount.defaultValue,
   awesomeDirection = DEFAULT_DIRECTION,
   fetchImpl = globalThis.fetch,
+  lookupImpl,
   timeoutMs = 120_000,
   signal: requestSignal,
 } = {}) {
@@ -112,6 +118,13 @@ export async function search(query, {
     }
     if (data.organic_results !== undefined && !Array.isArray(data.organic_results)) {
       throw new Error('Invalid SerpApi organic results');
+    }
+    if (Array.isArray(data.organic_results)) {
+      for (const row of data.organic_results) {
+        if (row && typeof row.link === 'string') {
+          row.link = unwrapDirectGoogleRedirectParam(row.link.trim());
+        }
+      }
     }
     return data;
   }
@@ -231,10 +244,66 @@ async function serveFrontend(request, response, pathname, frontendDir) {
   }
 }
 
+async function handlePreviewRequest(request, response, url, options) {
+  if (request.method !== 'GET') {
+    return json(response, 405, { error: 'Method not allowed' }, { Allow: 'GET' });
+  }
+  const targetUrl = url.searchParams.get('url')?.trim();
+  if (!targetUrl) {
+    return json(response, 400, { error: 'url is required' });
+  }
+  const mode = url.searchParams.get('mode')?.trim() || 'html';
+  if (mode !== 'inspect' && mode !== 'html') {
+    return json(response, 400, { error: 'mode must be inspect or html' });
+  }
+  const controller = new AbortController();
+  const abortRequest = () => {
+    if (!response.writableEnded) controller.abort();
+  };
+  response.once('close', abortRequest);
+  try {
+    const result = await inspectOrRenderPreview(targetUrl, {
+      mode,
+      fetchImpl: options.fetchImpl,
+      lookupImpl: options.lookupImpl,
+      signal: controller.signal,
+    });
+    if (response.destroyed) return;
+    if (result.kind === 'json') {
+      return json(response, 200, result.body, {
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+    }
+    const body = Buffer.from(result.html, 'utf8');
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': body.length,
+      'Cache-Control': 'private, max-age=60',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy':
+        "default-src * data: blob: 'unsafe-inline'; script-src 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'self'",
+    });
+    response.end(body);
+  } catch (error) {
+    if (response.destroyed) return;
+    if (error instanceof UnsafeUrlError) {
+      return json(response, 400, { error: error.message });
+    }
+    return json(response, 502, { error: 'Preview unavailable' });
+  } finally {
+    response.removeListener('close', abortRequest);
+  }
+}
+
 export function createSearchServer(options = {}) {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
+      if (url.pathname === '/preview') {
+        return await handlePreviewRequest(request, response, url, options);
+      }
       if (url.pathname !== '/search' && options.frontendDir) {
         return await serveFrontend(request, response, url.pathname, options.frontendDir);
       }
