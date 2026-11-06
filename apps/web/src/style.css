@@ -122,31 +122,33 @@ a {
     position: relative;
     min-width: 0;
     overflow: hidden;
-}
-
-.history-rail {
-    will-change: transform;
+    pointer-events: none;
 }
 
 .history-scene {
     perspective: 700px;
+    perspective-origin: 50% min(50%, 420px);
     height: 100dvh;
     background: transparent;
 }
 
 .history-list {
+    --history-offset: 0px;
     list-style: none;
     padding: 0;
     margin: 40px 0 0;
     width: 260px;
-    transform: rotateX(38deg) rotateY(-30deg) rotateZ(-8deg);
+    transform: rotateX(38deg) rotateY(-30deg) rotateZ(-8deg) translate3d(0, calc(var(--history-offset) * -1), 0);
     transform-origin: 50% 0;
+    will-change: transform;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    pointer-events: none;
 }
 
 .history-page {
+    position: relative;
     backface-visibility: hidden;
     flex: none;
     border: 1px solid #000;
@@ -154,6 +156,19 @@ a {
     padding: 16px;
     min-height: 140px;
     cursor: pointer;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.history-page::before {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+}
+
+.history-list > [data-culled="true"] {
+    visibility: hidden;
+    pointer-events: none;
 }
 
 .history-page a,
@@ -255,7 +270,8 @@ a {
 }
 .stack-app { position: relative; height: 100dvh; overflow: hidden; user-select: none; -webkit-user-select: none; }
 .stack-stage { position: absolute; inset: 0; overflow: hidden; min-width: 0; }
-.stack-app > .history { position: absolute; inset: 0 0 0 auto; width: 280px; z-index: 5; background: transparent; }
+.stack-app > .history { position: absolute; inset: 0 0 0 auto; width: 280px; z-index: 3; background: transparent; }
+.stack-app:has(.page-preview:not([hidden])) > .history .history-page { pointer-events: none; }
 .stack-query { position: absolute; top: 24px; left: 0; width: 100%; text-align: center; z-index: 2; font-size: 26px; }
 .stack-query input { width: min(60%, 390px); border: 0; border-bottom: 1px solid #000; background: transparent; outline: 0; user-select: text; -webkit-user-select: text; }
 .stack-query input::placeholder { opacity: .8; color: #000; font-size: 20px; }
@@ -266,7 +282,7 @@ a {
 .stack-card a, .stack-card-url { display: block; margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; text-decoration: underline; }
 .stack-card p { font-size: 16px; line-height: 1.5; }
 .stack-card:focus { outline: none; }
-.stack-detail { position: absolute; z-index: 3; bottom: 28px; left: 50%; transform: translateX(-50%); text-align: center; background: #fff; width: min(80%,560px); }
+.stack-detail { position: absolute; z-index: 5; bottom: 28px; left: 50%; transform: translateX(-50%); text-align: center; background: #fff; width: min(80%,560px); }
 .stack-detail[hidden] { display: none; }
 .stack-detail p { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .stack-detail button { border: 0; background: none; color: #000; font: inherit; margin: 0 10px; padding: 0; }
