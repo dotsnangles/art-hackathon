@@ -5,6 +5,8 @@ import { visitedHistory, type PageRecord, type SiteFixture } from './data.ts';
 import { createCardSpace } from './card-space.ts';
 import { fetchDeconstruct, fetchPhrases, type DeconstructResponse } from './deconstruct-api.ts';
 import { createDeconstructView, type DeconstructView } from './deconstruct-view.ts';
+import { createHistoryRailController } from './history-rail.ts';
+
 import { buildPreviewWsUrl, inspectPreviewTarget, type PreviewMetadata } from './preview-api.ts';
 import { mountRemoteBrowser, type RemoteBrowserController } from './remote-browser-client.ts';
 
@@ -353,12 +355,8 @@ export function createFrontend(
   });
   scope.trackListener(queryToggle, 'click', () => setQueryHistoryOpen(queryHistory.hidden));
 
-  const panel = container.querySelector<HTMLElement>('.history')!;
-  const rail = container.querySelector<HTMLElement>('.history-rail')!;
   let fixture: SiteFixture | null = null;
   let selectedId: string | null = null;
-  let velocity = 0;
-  let offset = 0;
   const seen = new Set<string>();
 
   function openPagePreview(id: string) {
@@ -430,12 +428,13 @@ export function createFrontend(
   }
 
   const space = createCardSpace(stage, scope, openPagePreview);
-
-  scope.trackListener(list, 'click', (event) => {
-    const historyItem = (event.target as Element).closest<HTMLElement>('.history-page[data-node-id]');
-    if (!historyItem?.dataset.nodeId) return;
-    openPagePreview(historyItem.dataset.nodeId);
-  });
+  const historyRail = createHistoryRailController(
+    app,
+    list,
+    scope,
+    openPagePreview,
+    () => !preview.hidden,
+  );
 
   // Capture before card handlers so an outside click closes rather than reopening a card.
   scope.trackListener(app, 'click', (event) => {
@@ -458,8 +457,7 @@ export function createFrontend(
     selectedId = null;
     seen.clear();
     list.replaceChildren(historyTitle);
-    offset = 0;
-    velocity = 0;
+    historyRail.reset();
     detail.hidden = true;
     app.dataset.phase = 'entry';
     input.value = '';
@@ -499,37 +497,11 @@ export function createFrontend(
     if (page) void startDecompose(page);
   });
   scope.trackListener(loadingOverlay.querySelector('.loading-cancel')!, 'click', () => { flow?.controller.abort(); });
-  scope.trackListener(panel, 'pointermove', (event) => {
-    const rect = panel.getBoundingClientRect();
-    const y = ((event as PointerEvent).clientY - rect.top) / rect.height;
-    velocity = y < 0.4 ? (y - 0.4) * 900 : y > 0.6 ? (y - 0.6) * 900 : 0;
-  });
-  scope.trackListener(panel, 'pointerleave', () => {
-    velocity = 0;
-  });
-  scope.trackListener(
-    panel,
-    'wheel',
-    (event) => {
-      const e = event as WheelEvent;
-      e.preventDefault();
-      offset += e.deltaY;
-    },
-    { passive: false },
-  );
   scope.trackRaf((_time, _wrapped, dt) => {
     if (!loadingOverlay.hidden) {
       loadingElapsed += dt;
       loadingDots.textContent = '.'.repeat([2, 3, 4, 3, 2][Math.floor(loadingElapsed / 0.35) % 5]!);
     }
-    offset = Math.max(
-      0,
-      Math.min(
-        Math.max(0, list.getBoundingClientRect().height - panel.clientHeight * 0.65),
-        offset + velocity * dt,
-      ),
-    );
-    rail.style.transform = `translateY(${-offset}px)`;
   });
 
   return {
@@ -558,7 +530,6 @@ export function createFrontend(
       activeQuery = next.query;
       seen.clear();
       list.replaceChildren(historyTitle);
-      offset = 0;
       detail.hidden = true;
       queryHistory.replaceChildren();
       queryStops.length = 0;
@@ -566,11 +537,15 @@ export function createFrontend(
       setQueryHistoryOpen(false);
       input.value = next.query;
       app.dataset.phase = 'map';
+      historyRail.reset();
       space.begin(next);
     },
     update(snapshot) {
       if (!fixture) return;
       space.update(snapshot);
+      const previousFirstCard = list.querySelector<HTMLElement>('.history-page');
+      const previousFirstTop = previousFirstCard?.offsetTop ?? 0;
+      let added = false;
       for (const entry of visitedHistory(snapshot).reverse()) {
         if (seen.has(entry.id)) continue;
         const node = snapshot.nodeMap.get(entry.nodeId!);
@@ -587,6 +562,10 @@ export function createFrontend(
         text.textContent = node.content?.snippet ?? '';
         item.append(trigger, text);
         historyTitle.after(item);
+        added = true;
+      }
+      if (added) {
+        historyRail.syncAfterPrepend(previousFirstCard, previousFirstTop);
       }
     },
   };
