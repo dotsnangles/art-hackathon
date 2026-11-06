@@ -3,9 +3,14 @@ import type { CrawlSnapshot } from '@akl/graph-contract';
 import type { DisposableScope } from '@akl/lab-kit';
 import { visitedHistory, type PageRecord, type SiteFixture } from './data.ts';
 import { createCardSpace } from './card-space.ts';
+import { fetchDeconstruct, fetchPhrases, type DeconstructResponse } from './deconstruct-api.ts';
+import { createDeconstructView, type DeconstructView } from './deconstruct-view.ts';
 import { buildPreviewWsUrl, inspectPreviewTarget, type PreviewMetadata } from './preview-api.ts';
 import { mountRemoteBrowser, type RemoteBrowserController } from './remote-browser-client.ts';
 
+// Every request costs money and takes 8 to 21 seconds, and the server keeps no result cache.
+const DECONSTRUCT_CACHE_SIZE = 8;
+const DECONSTRUCT_DEADLINE_MS = 165_000;
 export interface FrontendView {
   begin(fixture: SiteFixture): void;
   update(snapshot: CrawlSnapshot): void;
@@ -31,6 +36,7 @@ export function createFrontend(
   onContinue?: (nodeId: string) => void,
   onReturnToSearch?: () => void,
   apiEndpoint = '',
+  deconstructEndpoint = '/deconstruct',
 ): FrontendView {
   container.innerHTML = `<main class="stack-app" data-phase="entry">
     <button type="button" class="return-to-search" aria-label="검색어 입력 화면으로 돌아가기"><span aria-hidden="true"></span></button>
@@ -51,13 +57,14 @@ export function createFrontend(
         </div>
         <div class="preview-frame"></div>
       </section>
-      <section class="stack-detail" hidden><p></p><button type="button" class="back">되돌아가기</button> <button type="button" class="decompose" disabled title="콘텐츠 분해 기능은 준비 중입니다">분해 (준비 중)</button> <button type="button" class="continue-search">검색 이어가기</button></section>
+      <section class="stack-detail" hidden><p></p><button type="button" class="back">되돌아가기</button> <button type="button" class="decompose">분해</button> <button type="button" class="continue-search">검색 이어가기</button><span class="decompose-status" role="status" hidden></span></section>
     </section>
     <aside class="history" aria-label="탐색 히스토리"><div class="history-rail"><div class="history-scene"><ol class="history-list" aria-label="방문 페이지 최신순"><li class="history-title">history</li></ol></div></div></aside>
     <div class="search-loading" hidden role="status" aria-label="검색 중입니다">
       <img class="loading-horse" src="${horseUrl}" alt="" />
       <div class="loading-bar" role="progressbar" aria-label="검색 응답 대기"><span></span></div>
-      <p aria-hidden="true">검색중입니다<span class="loading-dots">..</span></p>
+      <p aria-hidden="true"><span class="loading-label">검색중입니다</span><span class="loading-dots">..</span></p>
+      <button type="button" class="loading-cancel" hidden>취소</button>
     </div>
   </main>`;
 
@@ -82,18 +89,97 @@ export function createFrontend(
   let previewAbort: AbortController | null = null;
   let activeRemoteBrowser: RemoteBrowserController | null = null;
 
-  function setLoading(loading: boolean) {
-    loadingOverlay.hidden = !loading;
-    loadingElapsed = 0;
-    loadingDots.textContent = '..';
+  function showOverlay(loading: boolean, label = '검색중입니다', cancellable = false) {
+    // The deconstruct page makes the overlay inert too, and its cancel button must work the next time.
+    loadingOverlay.inert = false;
+    loadingOverlay.hidden = !loading; loadingElapsed = 0; loadingDots.textContent = '..';
+    loadingOverlay.querySelector('.loading-label')!.textContent = label;
+    loadingOverlay.setAttribute('aria-label', `${label.replace('중입니다', ' 중입니다')}`);
+    loadingOverlay.querySelector<HTMLButtonElement>('.loading-cancel')!.hidden = !cancellable;
     app.setAttribute('aria-busy', String(loading));
     for (const child of Array.from(app.children)) {
       if (child !== loadingOverlay) (child as HTMLElement).inert = loading;
     }
-    if (loading) {
-      closePreview();
-      setQueryHistoryOpen(false);
+  }
+  function setLoading(loading: boolean) {
+    if (loading) closeFlow();
+    showOverlay(loading);
+    if (loading) { closePreview(); setQueryHistoryOpen(false); }
+  }
+  /** One card's trip through the deconstruct page and back. Only one runs at a time. */
+  interface DecomposeFlow { controller: AbortController; view: DeconstructView | null; assembling: boolean }
+  let flow: DecomposeFlow | null = null;
+  /** The phrase behind the cards on screen: what the user typed, or the last continued search. */
+  let activeQuery = '';
+  const deconstructCache = new Map<string, DeconstructResponse>();
+  function setDecomposeStatus(message: string) {
+    const status = detail.querySelector<HTMLElement>('.decompose-status')!;
+    status.textContent = message; status.hidden = !message;
+  }
+  function endFlow(message = '') {
+    flow = null;
+    showOverlay(false);
+    setDecomposeStatus(message);
+  }
+  /** Immediate teardown for anything that replaces the current page, such as a new search. */
+  function closeFlow() {
+    if (!flow) return;
+    flow.controller.abort(); flow.view?.dispose();
+    endFlow();
+  }
+  scope.add(closeFlow);
+  async function loadDeconstruct(href: string, query: string, signal: AbortSignal): Promise<DeconstructResponse> {
+    const key = `${href}\0${query}`;
+    const cached = deconstructCache.get(key);
+    if (cached) return cached;
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), DECONSTRUCT_DEADLINE_MS);
+    try {
+      const result = await fetchDeconstruct(deconstructEndpoint, href, query, AbortSignal.any([signal, deadline.signal]));
+      if (deconstructCache.size >= DECONSTRUCT_CACHE_SIZE) deconstructCache.delete(deconstructCache.keys().next().value!);
+      deconstructCache.set(key, result);
+      return result;
+    } catch (error) {
+      throw deadline.signal.aborted ? new Error('분해 시간이 너무 오래 걸려 중단했습니다.') : error;
+    } finally { clearTimeout(timer); }
+  }
+  async function startDecompose(page: SiteFixture['pages'][number]) {
+    if (flow || !deconstructEndpoint) return;
+    const current: DecomposeFlow = { controller: new AbortController(), view: null, assembling: false };
+    flow = current;
+    setDecomposeStatus('');
+    showOverlay(true, '분해중입니다', true);
+    const query = activeQuery;
+    let result: DeconstructResponse;
+    try {
+      result = await loadDeconstruct(page.href, query, current.controller.signal);
+    } catch (error) {
+      if (flow !== current) return;
+      endFlow(current.controller.signal.aborted ? '' : error instanceof Error ? error.message : '분해에 실패했습니다.');
+      return;
     }
+    if (flow !== current) return;
+    current.view = createDeconstructView(app, {
+      title: page.node.content?.title ?? page.node.domain, query, result,
+      onAssemble: () => { void assemble(current); },
+      onResearch: (term) => {
+        closeFlow(); closePreview(); detail.hidden = true; selectedId = null;
+        input.value = term; onSearch(term);
+      },
+      loadPhrases: (text, signal) => fetchPhrases(deconstructEndpoint, text, query, signal),
+    });
+    showOverlay(false);
+    const viewElement = app.querySelector('.deconstruct-view');
+    for (const child of Array.from(app.children)) (child as HTMLElement).inert = child !== viewElement;
+    current.view.enter();
+  }
+  async function assemble(current: DecomposeFlow) {
+    if (flow !== current || current.assembling || !current.view) return;
+    current.assembling = true;
+    await current.view.assemble();
+    if (flow !== current) return;
+    current.view.dispose();
+    endFlow();
   }
 
   function closePreview() {
@@ -261,6 +347,7 @@ export function createFrontend(
     detail.hidden = true;
     selectedId = null;
     input.value = stop.query;
+    activeQuery = stop.query;
     space.visitStack(stop.pageIds);
     setQueryHistoryOpen(false);
   });
@@ -276,7 +363,8 @@ export function createFrontend(
 
   function openPagePreview(id: string) {
     const page = fixture?.pages.find((item) => item.node.id === id);
-    if (!page) return;
+    if (!page || flow) return;
+    setDecomposeStatus('');
     selectedId = id;
     space.focus(id);
     const titleText = page.node.content?.title ?? page.node.domain;
@@ -352,17 +440,20 @@ export function createFrontend(
   // Capture before card handlers so an outside click closes rather than reopening a card.
   scope.trackListener(app, 'click', (event) => {
     const target = event.target as Element;
-    if (preview.hidden || preview.contains(target) || detail.contains(target)) return;
+    // The deconstruct page and its loading screen sit over the live preview, which must survive their clicks.
+    if (flow || preview.hidden || preview.contains(target) || detail.contains(target)) return;
     closePreview(); detail.hidden = true; selectedId = null; space.back();
     if (target.closest('[data-page-id]')) {
       event.preventDefault(); event.stopPropagation();
     }
   }, { capture: true });
   scope.trackListener(container.querySelector('.return-to-search')!, 'click', () => {
+    closeFlow();
     onReturnToSearch?.();
     setLoading(false);
     closePreview();
     space.reset();
+    activeQuery = '';
     fixture = null;
     selectedId = null;
     seen.clear();
@@ -387,7 +478,8 @@ export function createFrontend(
     }
   });
   scope.trackListener(detail, 'click', (event) => {
-    if ((event.target as Element).closest('button')) closePreview();
+    // Decomposing keeps the page alive, so assembling brings it straight back without reloading.
+    if ((event.target as Element).closest('button:not(.decompose)')) closePreview();
   });
   scope.trackListener(detail.querySelector('.continue-search')!, 'click', () => {
     if (selectedId && onContinue) {
@@ -400,6 +492,13 @@ export function createFrontend(
     detail.hidden = true;
     space.back();
   });
+  const decompose = detail.querySelector<HTMLButtonElement>('.decompose')!;
+  if (!deconstructEndpoint) { decompose.disabled = true; decompose.textContent = '분해 (사용 불가)'; }
+  scope.trackListener(decompose, 'click', () => {
+    const page = fixture?.pages.find((item) => item.node.id === selectedId);
+    if (page) void startDecompose(page);
+  });
+  scope.trackListener(loadingOverlay.querySelector('.loading-cancel')!, 'click', () => { flow?.controller.abort(); });
   scope.trackListener(panel, 'pointermove', (event) => {
     const rect = panel.getBoundingClientRect();
     const y = ((event as PointerEvent).clientY - rect.top) / rect.height;
@@ -439,6 +538,7 @@ export function createFrontend(
       container.querySelector('output')!.textContent = message;
     },
     append(next, anchorId) {
+      closeFlow();
       closePreview();
       const previousIds = new Set(fixture?.pages.map((page) => page.node.id));
       addQuery(
@@ -446,13 +546,16 @@ export function createFrontend(
         next.pages.filter((page) => !previousIds.has(page.node.id)).map((page) => page.node.id),
       );
       fixture = next;
+      activeQuery = next.query;
       input.value = next.query;
       detail.hidden = true;
       space.append(next, anchorId);
     },
     begin(next) {
+      closeFlow();
       closePreview();
       fixture = next;
+      activeQuery = next.query;
       seen.clear();
       list.replaceChildren(historyTitle);
       offset = 0;

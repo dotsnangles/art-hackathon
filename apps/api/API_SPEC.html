@@ -30,7 +30,7 @@
 <main id="top">
 <header class="hero"><div class="eyebrow">API REFERENCE</div><h1>HTTP API 명세</h1><p class="lead">검색 API 구현 명세와 콘텐츠 분해 API의 예정 인터페이스</p><div class="badges"><span>GET /search</span><span>SerpApi</span><span>Claude / OpenAI</span><span>Node.js PoC</span></div></header>
 <section id="overview"><h2>공통 사항</h2>
-<ul><li>요청 방식: <code>GET</code></li><li>응답 형식: <code>application/json</code></li><li>쿼리 파라미터의 값은 URL 인코딩하여 전달한다.</li><li>현재 <code>/search</code>를 구현했다. <code>/deconstruct</code>는 향후 구현할 명세이며 현재 요청하면 <code>404</code>를 반환한다.</li><li><code>/search</code>는 별도 인증이 없다. 서버 기동에는 <code>SERPAPI_API_KEY</code>와 선택한 LLM 공급자의 API 키가 필요하다.</li><li><code>LLM_PROVIDER</code>는 <code>anthropic</code>(기본값) 또는 <code>openai</code>다. 생략·공백이면 Claude를 사용하며 다른 값은 서버 기동 오류다.</li><li>Claude 선택 시 <code>ANTHROPIC_API_KEY</code>가 필요하며 <code>ANTHROPIC_MODEL</code>의 기본값은 <code>claude-opus-5-5</code>다.</li><li>OpenAI 선택 시 <code>OPENAI_API_KEY</code>가 필요하며 <code>OPENAI_MODEL</code>의 기본값은 <code>gpt-6.1-sol</code>이다.</li><li>모델 설정 생략·공백 시 해당 공급자의 기본 모델을 사용한다. 선택하지 않은 공급자의 키·모델 설정은 무시한다. 공급자·키·모델은 서버 설정이며 클라이언트 쿼리 파라미터로 받지 않는다.</li></ul>
+<ul><li>요청 방식: <code>GET</code></li><li>응답 형식: <code>application/json</code></li><li>쿼리 파라미터의 값은 URL 인코딩하여 전달한다.</li><li><code>/search</code>는 이 서버가, <code>/deconstruct</code>는 <code>apps/deconstruct</code> 서버가 처리한다. <code>pnpm start</code>와 개발 서버가 <code>/deconstruct</code>를 프록시하며, 프록시 없이 단독으로 띄운 검색 서버에서는 <code>404</code>를 반환한다.</li><li><code>/search</code>는 별도 인증이 없다. 서버 기동에는 <code>SERPAPI_API_KEY</code>와 선택한 LLM 공급자의 API 키가 필요하다.</li><li><code>LLM_PROVIDER</code>는 <code>anthropic</code>(기본값) 또는 <code>openai</code>다. 생략·공백이면 Claude를 사용하며 다른 값은 서버 기동 오류다.</li><li>Claude 선택 시 <code>ANTHROPIC_API_KEY</code>가 필요하며 <code>ANTHROPIC_MODEL</code>의 기본값은 <code>claude-opus-5-5</code>다.</li><li>OpenAI 선택 시 <code>OPENAI_API_KEY</code>가 필요하며 <code>OPENAI_MODEL</code>의 기본값은 <code>gpt-6.1-sol</code>이다.</li><li>모델 설정 생략·공백 시 해당 공급자의 기본 모델을 사용한다. 선택하지 않은 공급자의 키·모델 설정은 무시한다. 공급자·키·모델은 서버 설정이며 클라이언트 쿼리 파라미터로 받지 않는다.</li></ul>
 </section>
 <section id="search"><h2>1. 검색</h2>
 <div class="code-block"><div class="code-label">HTTP</div><pre><code>GET /search?query={query}&amp;awesomeDirection={direction}&amp;awesomeQueryCount=10&amp;awesomeCount=3&amp;goodCount=30</code></pre></div>
@@ -101,8 +101,8 @@
 <p>SerpApi가 정상 빈 결과(<code>search_metadata.status: &quot;Success&quot;</code>, <code>organic_results_state: &quot;Fully empty&quot;</code>, <code>error: &quot;Google hasn&#x27;t returned any results for this query.&quot;</code>)를 반환하면 <code>502</code>로 처리하지 않고 빈 페이지로 취급한다. 실제 외부 오류는 일부 수집 결과 대신 <code>502</code>를 반환하며 다른 진행 중인 호출을 취소한다. 외부 오류 메시지나 API 키를 노출하지 않는다.</p>
 </section>
 <section id="deconstruct"><h2>2. 콘텐츠 분해</h2>
-<div class="code-block"><div class="code-label">HTTP</div><pre><code>GET /deconstruct?url={url}</code></pre></div>
-<p>향후 구현할 엔드포인트다. 대상 URL의 콘텐츠를 텍스트와 이미지로 분해하고, 콘텐츠 간 가중치를 반환한다. 현재 서버에서는 <code>404</code>를 반환한다.</p>
+<div class="code-block"><div class="code-label">HTTP</div><pre><code>GET /deconstruct?url={url}&amp;query={query}</code></pre></div>
+<p>대상 URL의 콘텐츠를 텍스트와 이미지로 분해하고, 콘텐츠 간 가중치를 반환한다. 가중치와 오류 코드의 상세 규칙은 <code>apps/deconstruct/FRONTEND.md</code>를 따른다.</p>
 <h3>요청 파라미터</h3>
 <div class="table-wrap"><table><thead><tr><th scope="col">이름</th><th scope="col">위치</th><th scope="col">타입</th><th scope="col">필수</th><th scope="col">설명</th></tr></thead><tbody><tr><td><code>url</code></td><td>query</td><td>string</td><td>예</td><td>분해할 페이지 URL</td></tr></tbody></table></div>
 <h3>응답 구조</h3>
@@ -113,7 +113,7 @@
 <p><code>WEIGHT_TYPE</code>은 다음 순서의 값 3개를 담은 배열(튜플)이다.</p>
 <div class="code-block"><div class="code-label">TEXT</div><pre><code>[CONTENT_IDX_1, CONTENT_IDX_2, WEIGHT]</code></pre></div>
 <div class="table-wrap"><table><thead><tr><th scope="col">위치</th><th scope="col">이름</th><th scope="col">타입</th><th scope="col">설명</th></tr></thead><tbody><tr><td>0</td><td><code>CONTENT_IDX_1</code></td><td>integer</td><td>첫 번째 콘텐츠의 <code>contents</code> 배열 인덱스</td></tr><tr><td>1</td><td><code>CONTENT_IDX_2</code></td><td>integer</td><td>두 번째 콘텐츠의 <code>contents</code> 배열 인덱스</td></tr><tr><td>2</td><td><code>WEIGHT</code></td><td>number</td><td>두 콘텐츠 사이의 가중치</td></tr></tbody></table></div>
-<p>콘텐츠 인덱스는 <code>0</code>부터 시작한다고 가정한다. 예를 들어 <code>[0, 1, 0.8]</code>은 <code>contents[0]</code>과 <code>contents[1]</code> 사이의 가중치가 <code>0.8</code>임을 나타낸다. 가중치의 허용 범위는 아직 정해지지 않았다.</p>
+<p>콘텐츠 인덱스는 <code>0</code>부터 시작한다고 가정한다. 예를 들어 <code>[0, 1, 0.8]</code>은 <code>contents[0]</code>과 <code>contents[1]</code> 사이의 가중치가 <code>0.8</code>임을 나타낸다. 값은 0~1 실수이며, 모든 쌍을 인덱스가 작은 쪽을 앞에 두어 한 번씩 반환한다.</p>
 <h3>응답 예시</h3>
 <div class="code-block"><div class="code-label">JSON</div><pre><code>{
   &quot;contents&quot;: [
@@ -139,8 +139,8 @@
 <section id="notes"><h2>콘텐츠 분해의 작성 가정 및 미정 사항</h2>
 <h3>작성 가정</h3>
 <ul><li><code>/deconstruct</code>는 <code>GET</code> 메서드를 사용하고 JSON을 반환한다.</li><li><code>url</code> 요청 파라미터는 필수다.</li><li>URL과 텍스트 필드는 문자열, <code>WEIGHT</code>는 숫자로 표현한다.</li><li><code>CONTENT_IDX_1</code>, <code>CONTENT_IDX_2</code>는 0부터 시작하는 정수 인덱스다.</li></ul>
-<h3>미정 사항</h3>
-<ul><li><code>/deconstruct</code> 필드의 <code>null</code> 허용 여부 및 콘텐츠가 없을 때의 표현</li><li><code>WEIGHT</code>의 의미와 허용 범위, 콘텐츠 쌍의 방향성 및 중복 허용 여부</li><li><code>/deconstruct</code>의 인증 방식, 오류 상태 코드와 오류 응답 구조</li></ul>
+<h3>조각 재분해</h3><p><code>GET /deconstruct/phrases?text={text}&amp;query={query}</code>는 조각 글(최대 1000자)을 구절로 나눈다. 응답은 <code>phrases</code>, <code>source</code>(<code>llm</code> 또는 <code>rule</code>), 선택적 <code>querySimilarities</code>이며, 구절은 원문 순서대로 서로 겹치지 않는 원문의 일부다.</p><h3>미정 사항</h3>
+<ul><li><code>/deconstruct</code>의 인증 방식과 요청 빈도 제한</li></ul>
 </section>
 <footer>HTTP API 명세 · API_SPEC.md 기준</footer>
 </main>

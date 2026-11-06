@@ -14,6 +14,11 @@ export default defineConfig({
         timeout: 130_000,
         proxyTimeout: 130_000,
       },
+      '/deconstruct': {
+        target: `http://127.0.0.1:${process.env.DECONSTRUCT_PORT || 3001}`,
+        timeout: 170_000,
+        proxyTimeout: 170_000,
+      },
       '/preview': {
         target: `http://127.0.0.1:${process.env.PORT || 3000}`,
         timeout: 15_000,

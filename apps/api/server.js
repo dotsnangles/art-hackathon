@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, extname } from 'node:path';
@@ -267,6 +267,31 @@ async function serveFrontend(request, response, pathname, frontendDir) {
   }
 }
 
+const DECONSTRUCT_ROUTES = new Set(['/deconstruct', '/deconstruct/phrases']);
+
+/** Forwards only the public routes, so the service's health and debug routes stay private. */
+function proxyDeconstruct(request, response, pathname, search, origin) {
+  if (request.method !== 'GET') {
+    return json(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'GET만 허용합니다.' } }, { Allow: 'GET' });
+  }
+  const upstream = httpRequest(new URL(`${pathname}${search}`, origin), {
+    method: 'GET',
+    headers: { Accept: 'application/json', ...(request.headers['accept-encoding'] ? { 'Accept-Encoding': request.headers['accept-encoding'] } : {}) },
+  }, (reply) => {
+    const headers = { 'Content-Type': reply.headers['content-type'] ?? 'application/json; charset=utf-8' };
+    if (reply.headers['content-encoding']) headers['Content-Encoding'] = reply.headers['content-encoding'];
+    if (reply.headers.vary) headers.Vary = reply.headers.vary;
+    response.writeHead(reply.statusCode ?? 502, headers);
+    reply.pipe(response);
+  });
+  upstream.once('error', () => {
+    if (response.headersSent) return response.destroy();
+    if (!response.destroyed) json(response, 502, { error: { code: 'DECONSTRUCT_UNAVAILABLE', message: '분해 서버에 연결하지 못했습니다.' } });
+  });
+  response.once('close', () => { if (!response.writableEnded) upstream.destroy(); });
+  upstream.end();
+}
+
 async function handlePreviewRequest(request, response, url, options) {
   if (request.method !== 'GET') {
     return json(response, 405, { error: 'Method not allowed' }, { Allow: 'GET' });
@@ -338,6 +363,9 @@ export function createSearchServer(options = {}) {
     };
     try {
       const url = new URL(request.url, 'http://localhost');
+      if (DECONSTRUCT_ROUTES.has(url.pathname) && options.deconstructOrigin) {
+        return proxyDeconstruct(request, response, url.pathname, url.search, options.deconstructOrigin);
+      }
       if (url.pathname === '/preview') {
         return await handlePreviewRequest(request, response, url, options);
       }
