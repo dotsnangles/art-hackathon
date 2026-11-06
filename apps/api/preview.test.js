@@ -232,7 +232,7 @@ test('preview endpoint classifies iframe-allowed, XFO-proxied SSR, YouTube embed
   assert.equal(diningFetches, 1, 'cached HTML should be served without a second upstream fetch');
   assert.ok(htmlRes.headers.get('content-security-policy').includes("script-src 'none'"));
   const htmlText = await htmlRes.text();
-  assert.ok(htmlText.includes('<base href="https://dining.example.com/profile?id=1" target="_blank">'));
+  assert.ok(htmlText.includes('<base href="https://dining.example.com/profile?id=1" target="_self">'));
   assert.ok(!htmlText.includes('<script'));
   assert.ok(!htmlText.includes('http-equiv="Content-Security-Policy"'));
   assert.ok(htmlText.includes('src="/photos/slice.jpg"'));
@@ -258,10 +258,12 @@ test('frame header detector and HTML sanitizer handle CSP frame-ancestors varian
     false,
   );
   const cleaned = sanitizeProxiedHtml(
-    '<div onclick="evil()"><a href="javascript:void(0)">본문</a></div><script>alert(1)</script>',
+    '<div onclick="evil()"><a href="javascript:void(0)">본문</a><a href="/menu" target="_blank">메뉴</a></div><script>alert(1)</script>',
     'https://a.example/path',
   );
-  assert.ok(cleaned.includes('<base href="https://a.example/path" target="_blank">'));
+  assert.ok(cleaned.includes('<base href="https://a.example/path" target="_self">'));
+  assert.ok(cleaned.includes('href="/preview?url=https%3A%2F%2Fa.example%2Fmenu"'));
+  assert.ok(!cleaned.includes('target="_blank"'));
   assert.ok(!cleaned.includes('<script'));
   assert.ok(!cleaned.includes('onclick='));
   assert.ok(!cleaned.includes('javascript:'));

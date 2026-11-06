@@ -434,7 +434,32 @@ export function sanitizeProxiedHtml(html, finalUrl) {
     return full;
   });
 
-  const injectedHead = `<meta charset="utf-8"><base href="${escapeHtmlAttr(finalUrl)}" target="_blank"><meta name="referrer" content="no-referrer">`;
+  // Rewrite external/relative HTTP(S) anchor links to stay inside /preview without opening new tabs.
+  sanitized = sanitized.replace(/<a\b([^>]*)>/gi, (full, rawAttrs) => {
+    let attrs = rawAttrs.replace(/\s+\btarget\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+)/gi, '');
+    const hrefMatch = attrs.match(/\bhref\s*=\s*(["'])([^"']*)\1/i);
+    if (!hrefMatch) return `<a${attrs}>`;
+    const quote = hrefMatch[1];
+    const rawHref = decodeBasicHtmlEntities(hrefMatch[2].trim());
+    if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('/preview?')) {
+      return `<a${attrs}>`;
+    }
+    try {
+      const resolved = new URL(rawHref, finalUrl);
+      if (resolved.protocol === 'http:' || resolved.protocol === 'https:') {
+        const inAppHref = `/preview?url=${encodeURIComponent(resolved.href)}`;
+        attrs = attrs.replace(
+          /\bhref\s*=\s*(["'])[^"']*\1/i,
+          `href=${quote}${escapeHtmlAttr(inAppHref)}${quote}`,
+        );
+      }
+    } catch {
+      // Keep original href if malformed.
+    }
+    return `<a target="_self"${attrs}>`;
+  });
+
+  const injectedHead = `<meta charset="utf-8"><base href="${escapeHtmlAttr(finalUrl)}" target="_self"><meta name="referrer" content="no-referrer">`;
   if (/<head\b[^>]*>/i.test(sanitized)) {
     sanitized = sanitized.replace(/<head\b[^>]*>/i, (tag) => `${tag}${injectedHead}`);
   } else {

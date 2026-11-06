@@ -19,6 +19,10 @@ export default defineConfig({
         timeout: 15_000,
         proxyTimeout: 15_000,
       },
+      '/preview-ws': {
+        target: `ws://127.0.0.1:${process.env.PORT || 3000}`,
+        ws: true,
+      },
     },
   },
   worker: { format: 'es' },

@@ -164,7 +164,7 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
       const face = document.createElement('article'); face.className = 'stack-card'; element.append(face); element.tabIndex = 0; element.dataset.pageId = page.node.id;
       element.setAttribute('aria-label', page.node.content?.title ?? page.node.domain);
       const title = document.createElement('strong'); title.textContent = page.node.content?.title ?? page.node.domain;
-      const link = document.createElement('a'); link.href = page.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      const link = document.createElement('span'); link.className = 'stack-card-url';
       link.textContent = page.href; link.title = page.href;
       const copy = document.createElement('p'); copy.textContent = page.node.content?.snippet ?? '';
       const content = document.createElement('div'); content.className = 'stack-card-content';

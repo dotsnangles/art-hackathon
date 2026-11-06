@@ -8,6 +8,8 @@ import {
   inspectOrRenderPreview,
   unwrapDirectGoogleRedirectParam,
 } from './preview.js';
+import { createRemoteBrowserManager } from './remote-browser.js';
+import { upgradeWebSocket } from './ws-frame.js';
 
 const COUNT_PARAMETERS = {
   goodCount: { defaultValue: 30, max: 100 },
@@ -298,7 +300,15 @@ async function handlePreviewRequest(request, response, url, options) {
 }
 
 export function createSearchServer(options = {}) {
-  return createServer(async (request, response) => {
+  const remoteBrowser = createRemoteBrowserManager({
+    chromeExecutable: options.chromeExecutable,
+    lookupImpl: options.lookupImpl,
+    fetchImpl: options.fetchImpl,
+    sessionFactory: options.remoteSessionFactory,
+    allowLoopbackForTest: options.__allowLoopbackForTest === true,
+  });
+
+  const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
       if (url.pathname === '/preview') {
@@ -339,6 +349,30 @@ export function createSearchServer(options = {}) {
       });
     }
   });
+
+  server.on('upgrade', (request, socket, head) => {
+    let url;
+    try {
+      url = new URL(request.url, 'http://localhost');
+    } catch {
+      socket.destroy();
+      return;
+    }
+    if (url.pathname !== '/preview-ws') {
+      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const ws = upgradeWebSocket(request, socket, head);
+    if (!ws) return;
+    void remoteBrowser.attachWebSocketClient(ws, url.searchParams);
+  });
+
+  server.once('close', () => {
+    void remoteBrowser.shutdown();
+  });
+
+  return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
