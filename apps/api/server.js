@@ -232,24 +232,51 @@ async function serveFrontend(request, response, pathname, frontendDir) {
 }
 
 export function createSearchServer(options = {}) {
+  let nextRequestId = 0;
   return createServer(async (request, response) => {
+    let logResponse;
+    const send = (status, body, headers) => {
+      logResponse?.(status, body);
+      return json(response, status, body, headers);
+    };
     try {
       const url = new URL(request.url, 'http://localhost');
       if (url.pathname !== '/search' && options.frontendDir) {
         return await serveFrontend(request, response, url.pathname, options.frontendDir);
       }
       if (STATIC_FILES.has(url.pathname)) return await serveStatic(request, response, STATIC_FILES.get(url.pathname));
-      if (url.pathname !== '/search') return json(response, 404, { error: 'Not found' });
+      if (url.pathname !== '/search') return send(404, { error: 'Not found' });
+      if (options.searchLogger) {
+        const requestId = ++nextRequestId;
+        const startedAt = Date.now();
+        const parameters = Object.fromEntries(['query', 'awesomeDirection', ...Object.keys(COUNT_PARAMETERS)]
+          .filter((name) => url.searchParams.has(name))
+          .map((name) => [name, url.searchParams.get(name)]));
+        options.searchLogger(`[search #${requestId}] request ${JSON.stringify({ method: request.method, ...parameters })}`);
+        logResponse = (status, body) => {
+          const summary = status === 200 ? {
+            good: body.good.map(({ rank, title }) => ({ rank, title })),
+            awesome: Object.entries(body.awesome)
+              .sort(([, a], [, b]) => a.rank - b.rank)
+              .map(([query, { rank, results }]) => ({
+                query, rank, results: results.map(({ rank, title }) => ({ rank, title })),
+              })),
+          } : { error: body.error };
+          options.searchLogger(`[search #${requestId}] response ${JSON.stringify({
+            status, durationMs: Date.now() - startedAt, ...summary,
+          }, null, 2)}`);
+        };
+      }
       if (request.method !== 'GET') {
-        return json(response, 405, { error: 'Method not allowed' }, { Allow: 'GET' });
+        return send(405, { error: 'Method not allowed' }, { Allow: 'GET' });
       }
       const query = url.searchParams.get('query')?.trim();
-      if (!query) return json(response, 400, { error: 'query is required' });
+      if (!query) return send(400, { error: 'query is required' });
       const counts = {};
       for (const [name, { defaultValue, max }] of Object.entries(COUNT_PARAMETERS)) {
         const raw = url.searchParams.get(name);
         if (raw !== null && (!/^\d+$/.test(raw) || Number(raw) > max)) {
-          return json(response, 400, { error: name + ' must be an integer from 0 to ' + max });
+          return send(400, { error: name + ' must be an integer from 0 to ' + max });
         }
         counts[name] = raw === null ? defaultValue : Number(raw);
       }
@@ -259,13 +286,13 @@ export function createSearchServer(options = {}) {
       response.once('close', abortRequest);
       try {
         const result = await search(query, { ...options, ...counts, awesomeDirection, signal: controller.signal });
-        if (!response.destroyed) json(response, 200, result);
+        if (!response.destroyed) send(200, result);
       } finally {
         response.removeListener('close', abortRequest);
       }
     } catch (error) {
       if (response.destroyed) return;
-      json(response, 502, {
+      send(502, {
         error: error instanceof QueryGenerationError ? error.message : 'SerpApi search failed',
       });
     }

@@ -215,6 +215,75 @@ test('HTTP decodes and trims query and direction and applies per-query counts', 
   }
 });
 
+test('search logs correlate requests with ranked titles and omit document payloads', async (t) => {
+  const logs = [];
+  const queries = ['가까운 관점', '먼 관점'];
+  const mock = mockUpstream({
+    queries,
+    serp: (query) => ({ organic_results: rows(query).map((row, index) => ({ ...row, position: index + 7 })) }),
+  });
+  const base = await listen(t, { ...mock, searchLogger: (line) => logs.push(line) });
+  const params = new URLSearchParams({
+    query: '  아트 & design  ', awesomeDirection: '생물학 관점',
+    goodCount: '1', awesomeQueryCount: '2', awesomeCount: '1',
+    api_key: 'should-not-be-logged',
+  });
+  const response = await fetch(base + '/search?' + params);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(logs.length, 2);
+  assert.ok(logs[0].startsWith('[search #1] request '));
+  assert.deepEqual(JSON.parse(logs[0].slice('[search #1] request '.length)), {
+    method: 'GET', query: '  아트 & design  ', awesomeDirection: '생물학 관점',
+    goodCount: '1', awesomeCount: '1', awesomeQueryCount: '2',
+  });
+  assert.ok(logs[1].startsWith('[search #1] response '));
+  const summary = JSON.parse(logs[1].slice('[search #1] response '.length));
+  assert.equal(summary.status, 200);
+  assert.ok(Number.isFinite(summary.durationMs) && summary.durationMs >= 0);
+  assert.deepEqual(summary.good, [{ rank: 7, title: 'Title 1/0' }]);
+  assert.deepEqual(summary.awesome, queries.map((query, index) => ({
+    query, rank: index + 1, results: [{ rank: 7, title: 'Title 1/0' }],
+  })));
+  assert.ok(result.good[0].url && result.good[0].image && result.good[0].description);
+  assert.doesNotMatch(logs.join('\n'), /https?:|"(?:url|image|description)"|Description|should-not-be-logged|test-.*-key/);
+
+  await fetch(base + '/search?query=empty&goodCount=0&awesomeCount=0');
+  assert.ok(logs[2].startsWith('[search #2] request '));
+  assert.ok(logs[3].startsWith('[search #2] response '));
+  const empty = JSON.parse(logs[3].slice('[search #2] response '.length));
+  assert.deepEqual(empty.good, []);
+  assert.deepEqual(empty.awesome, []);
+});
+
+test('search logs contain safe validation and upstream errors, ignoring other routes', async (t) => {
+  const logs = [];
+  const mock = mockUpstream({ serp: () => { throw new Error('private upstream url and key'); } });
+  const base = await listen(t, { ...mock, searchLogger: (line) => logs.push(line) });
+  await fetch(base + '/missing');
+  assert.deepEqual(logs, []);
+  for (const [path, options, status, error] of [
+    ['/search', undefined, 400, 'query is required'],
+    ['/search?query=art', { method: 'POST' }, 405, 'Method not allowed'],
+    ['/search?query=art&awesomeCount=0', undefined, 502, 'SerpApi search failed'],
+  ]) {
+    const response = await fetch(base + path, options);
+    assert.equal(response.status, status);
+    const summary = JSON.parse(logs.at(-1).slice(logs.at(-1).indexOf('response ') + 9));
+    assert.equal(summary.status, status);
+    assert.equal(summary.error, error);
+  }
+  assert.doesNotMatch(logs.join('\n'), /private upstream|test-.*-key/);
+});
+
+test('search logging is disabled unless a logger is supplied', async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const base = await listen(t, mockUpstream());
+  const response = await fetch(base + '/search?query=art&goodCount=1&awesomeQueryCount=1&awesomeCount=1');
+  assert.equal(response.status, 200);
+  assert.equal(log.mock.callCount(), 0);
+});
+
 test('omitted, empty and whitespace-only directions use the same default', async (t) => {
   const mock = mockUpstream();
   const base = await listen(t, mock);
