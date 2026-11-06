@@ -4,6 +4,8 @@ export default defineConfig({
   base: '/',
   server: {
     host: '127.0.0.1',
+    // Allow rotating ngrok tunnel subdomains.
+    allowedHosts: ['.ngrok-free.app', '.ngrok-free.dev', '.ngrok.io'],
     port: Number(process.env.WEB_PORT || 5173),
     strictPort: true,
     proxy: {
