@@ -650,7 +650,7 @@ test('Claude is the default and generates the same ranked search response withou
   assert.equal(headers['x-api-key'], anthropicApiKey);
   assert.equal(headers['anthropic-version'], '2023-06-01');
   assert.equal(headers['Content-Type'], 'application/json');
-  assert.equal(body.model, 'claude-sonnet-5-5');
+  assert.equal(body.model, 'claude-opus-5-5');
   assert.equal(body.max_tokens, 4096);
   assert.equal(body.messages[0].role, 'user');
   assert.deepEqual(JSON.parse(body.messages[0].content), {

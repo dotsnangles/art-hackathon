@@ -8,7 +8,7 @@
 - 현재 `/search`를 구현했다. `/deconstruct`는 향후 구현할 명세이며 현재 요청하면 `404`를 반환한다.
 - `/search`는 별도 인증이 없다. 서버 기동에는 `SERPAPI_API_KEY`와 선택한 LLM 공급자의 API 키가 필요하다.
 - `LLM_PROVIDER`는 `anthropic`(기본값) 또는 `openai`다. 생략·공백이면 Claude를 사용하며 다른 값은 서버 기동 오류다.
-- Claude 선택 시 `ANTHROPIC_API_KEY`가 필요하며 `ANTHROPIC_MODEL`의 기본값은 `claude-sonnet-5-5`다.
+- Claude 선택 시 `ANTHROPIC_API_KEY`가 필요하며 `ANTHROPIC_MODEL`의 기본값은 `claude-opus-5-5`다.
 - OpenAI 선택 시 `OPENAI_API_KEY`가 필요하며 `OPENAI_MODEL`의 기본값은 `gpt-6.1-sol`이다.
 - 모델 설정 생략·공백 시 해당 공급자의 기본 모델을 사용한다. 선택하지 않은 공급자의 키·모델 설정은 무시한다. 공급자·키·모델은 서버 설정이며 클라이언트 쿼리 파라미터로 받지 않는다.
 

@@ -1,6 +1,6 @@
 export const DEFAULT_LLM_PROVIDER = 'anthropic';
 export const LLM_PROVIDERS = {
-  anthropic: { defaultModel: 'claude-sonnet-5-5', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+  anthropic: { defaultModel: 'claude-opus-5-5', apiKeyEnv: 'ANTHROPIC_API_KEY' },
   openai: { defaultModel: 'gpt-6.1-sol', apiKeyEnv: 'OPENAI_API_KEY' },
 };
 
