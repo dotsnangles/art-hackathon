@@ -31,6 +31,8 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
   let fixture: SiteFixture | null = null;
   let placements = new Map<string, StackPlacement>();
   let visibleCount = 0;
+  let completionPending = false;
+  let completionSeen = false;
   let autoFrame = true;
   let followLatest = true;
   let renderedDistance = 1900;
@@ -49,7 +51,7 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
   scope.add(() => observer.disconnect());
   const clear = () => {
     for (const object of objects.values()) { scene.remove(object); object.element.remove(); }
-    objects.clear(); placements.clear(); shadowLayer.replaceChildren(); shadows.clear(); floor.replaceChildren(shadowLayer); arrows.clear();
+    objects.clear(); completionPending = false; completionSeen = false; placements.clear(); shadowLayer.replaceChildren(); shadows.clear(); floor.replaceChildren(shadowLayer); arrows.clear();
   };
   scope.add(() => { clear(); floor.remove(); renderer.domElement.remove(); });
   scope.trackRaf((_time, _wrapped, dt) => {
@@ -63,6 +65,13 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
       object.userData.appearance = Math.min(1, Number(object.userData.appearance ?? 0) + dt * 2.5);
       (object.element.firstElementChild as HTMLElement).style.opacity = String(object.userData.appearance);
       (object.element.firstElementChild as HTMLElement).style.transform = `translateY(${-object.userData.lift}px)`;
+    }
+    // Wait for the final card's fade-in before easing out to the full scene.
+    if (completionPending && autoFrame && followLatest) {
+      const visible = [...objects.values()].filter(object => object.parent);
+      if (visible.length && visible.every(object => Number(object.userData.appearance) >= 1)) {
+        completionPending = false; followLatest = false; frameAll();
+      }
     }
     camera.lookAt(target); renderer.render(scene, camera);
     const width = stage.clientWidth; const height = stage.clientHeight;
@@ -164,7 +173,7 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
       const face = document.createElement('article'); face.className = 'stack-card'; element.append(face); element.tabIndex = 0; element.dataset.pageId = page.node.id;
       element.setAttribute('aria-label', page.node.content?.title ?? page.node.domain);
       const title = document.createElement('strong'); title.textContent = page.node.content?.title ?? page.node.domain;
-      const link = document.createElement('a'); link.href = page.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      const link = document.createElement('span'); link.className = 'stack-card-url';
       link.textContent = page.href; link.title = page.href;
       const copy = document.createElement('p'); copy.textContent = page.node.content?.snippet ?? '';
       const content = document.createElement('div'); content.className = 'stack-card-content';
@@ -174,13 +183,13 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
       element.dataset.stackId = placement.stack;
       if (page.group === 'original') {
         const marker = document.createElement('div'); marker.className = 'original-stack-marker';
-        marker.textContent = 'good';
+        marker.textContent = 'aligned';
         marker.setAttribute('aria-label', '정방향 스택'); face.prepend(marker);
       }
       if (page.group === 'drift') {
         const marker = document.createElement('div'); marker.className = 'original-stack-marker awesome-stack-marker';
         marker.dataset.level = String(page.relevanceLevel ?? 1);
-        marker.textContent = String(page.relevanceLevel ?? 1).padStart(2, '0');
+        marker.textContent = `${String(page.relevanceLevel ?? 1).padStart(2, '0')} skewed`;
         marker.setAttribute('aria-label', `연관도 ${marker.textContent}`); face.prepend(marker);
       }
       if (placement.branchFrom) element.dataset.branchFrom = placement.branchFrom;
@@ -193,6 +202,9 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
   }
   function update(snapshot: CrawlSnapshot) {
     if (!fixture) return;
+    if (snapshot.status === 'complete' && !completionSeen) {
+      completionSeen = true; completionPending = true;
+    }
     const visits = visitedHistory(snapshot);
     for (const entry of visits) {
       const object = objects.get(entry.nodeId!);
@@ -231,6 +243,7 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
     },
     reset() { clear(); fixture = null; visibleCount = 0; },
     append(next: SiteFixture, anchorId: string) {
+      completionPending = false; completionSeen = false;
       const retained = new Set(next.pages.map((page) => page.node.id));
       for (const [id, object] of objects) {
         if (!retained.has(id)) { scene.remove(object); object.element.remove(); objects.delete(id); placements.delete(id); shadows.get(id)?.remove(); shadows.delete(id); }
