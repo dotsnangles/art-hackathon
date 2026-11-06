@@ -5,7 +5,7 @@
 - 요청 방식: `GET`
 - 응답 형식: `application/json`
 - 쿼리 파라미터의 값은 URL 인코딩하여 전달한다.
-- 현재 `/search`를 구현했다. `/deconstruct`는 향후 구현할 명세이며 현재 요청하면 `404`를 반환한다.
+- `/search`는 이 서버가, `/deconstruct`는 `apps/deconstruct` 서버가 처리한다. `pnpm start`와 개발 서버가 `/deconstruct`를 프록시하며, 프록시 없이 단독으로 띄운 검색 서버에서는 `404`를 반환한다.
 - `/search`는 별도 인증이 없다. 서버 기동에는 `SERPAPI_API_KEY`와 선택한 LLM 공급자의 API 키가 필요하다.
 - `LLM_PROVIDER`는 `anthropic`(기본값) 또는 `openai`다. 생략·공백이면 Claude를 사용하며 다른 값은 서버 기동 오류다.
 - Claude 선택 시 `ANTHROPIC_API_KEY`가 필요하며 `ANTHROPIC_MODEL`의 기본값은 `claude-opus-5-5`다.
@@ -168,16 +168,17 @@ SerpApi가 정상 빈 결과(`search_metadata.status: "Success"`, `organic_resul
 ## 2. 콘텐츠 분해
 
 ```http
-GET /deconstruct?url={url}
+GET /deconstruct?url={url}&query={query}
 ```
 
-향후 구현할 엔드포인트다. 대상 URL의 콘텐츠를 텍스트와 이미지로 분해하고, 콘텐츠 간 가중치를 반환한다. 현재 서버에서는 `404`를 반환한다.
+대상 URL의 콘텐츠를 텍스트와 이미지로 분해하고, 콘텐츠 간 가중치를 반환한다. 가중치와 오류 코드의 상세 규칙은 [분해 API 연동 가이드](../deconstruct/FRONTEND.md)를 따른다.
 
 ### 요청 파라미터
 
 | 이름 | 위치 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- | --- |
 | `url` | query | string | 예 | 분해할 페이지 URL |
+| `query` | query | string | 아니오 | 유사도를 계산할 검색어. 최대 200자 |
 
 ### 응답 구조
 
@@ -185,6 +186,7 @@ GET /deconstruct?url={url}
 | --- | --- | --- |
 | `contents` | `CONTENT_TYPE[]` | 분해된 콘텐츠 목록 |
 | `weights` | `WEIGHT_TYPE[]` | 콘텐츠 쌍의 가중치 목록 |
+| `querySimilarities` | `number[]` | `query`가 있을 때만 포함. `contents`와 같은 순서의 검색어 유사도(0~1) |
 
 ### CONTENT_TYPE
 
@@ -192,6 +194,7 @@ GET /deconstruct?url={url}
 | --- | --- | --- |
 | `type` | `"text" \| "img"` | 콘텐츠 종류 |
 | `content` | string | `text`이면 어구, `img`이면 이미지 URL |
+| `label` | string | `img`의 설명 글자. 파일명으로 근사한 이미지에는 없음 |
 
 ### WEIGHT_TYPE
 
@@ -207,7 +210,7 @@ GET /deconstruct?url={url}
 | 1 | `CONTENT_IDX_2` | integer | 두 번째 콘텐츠의 `contents` 배열 인덱스 |
 | 2 | `WEIGHT` | number | 두 콘텐츠 사이의 가중치 |
 
-콘텐츠 인덱스는 `0`부터 시작한다고 가정한다. 예를 들어 `[0, 1, 0.8]`은 `contents[0]`과 `contents[1]` 사이의 가중치가 `0.8`임을 나타낸다. 가중치의 허용 범위는 아직 정해지지 않았다.
+콘텐츠 인덱스는 `0`부터 시작한다고 가정한다. 예를 들어 `[0, 1, 0.8]`은 `contents[0]`과 `contents[1]` 사이의 가중치가 `0.8`임을 나타낸다. 값은 0~1 실수이며, 모든 쌍을 인덱스가 작은 쪽을 앞에 두어 한 번씩 반환한다.
 
 ### 응답 예시
 
@@ -234,6 +237,14 @@ GET /deconstruct?url={url}
 }
 ```
 
+### 조각 재분해
+
+```http
+GET /deconstruct/phrases?text={text}&query={query}
+```
+
+조각 글(최대 1000자)을 구절로 나눈다. 응답은 `{ "phrases": string[], "source": "llm" | "rule", "querySimilarities"?: number[] }`이며, 구절은 원문 순서대로 서로 겹치지 않는 원문의 일부다. `querySimilarities`는 `query`가 있을 때만 포함한다.
+
 ## 콘텐츠 분해의 작성 가정 및 미정 사항
 
 ### 작성 가정
@@ -245,6 +256,4 @@ GET /deconstruct?url={url}
 
 ### 미정 사항
 
-- `/deconstruct` 필드의 `null` 허용 여부 및 콘텐츠가 없을 때의 표현
-- `WEIGHT`의 의미와 허용 범위, 콘텐츠 쌍의 방향성 및 중복 허용 여부
-- `/deconstruct`의 인증 방식, 오류 상태 코드와 오류 응답 구조
+- `/deconstruct`의 인증 방식과 요청 빈도 제한

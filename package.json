@@ -11,7 +11,9 @@
     "check": "tsc -p packages/graph-contract && tsc -p packages/lab-kit && tsc -p apps/web",
     "test": "pnpm test:api && pnpm test:web",
     "test:api": "node --test apps/api/*.test.js tests/*.test.mjs",
-    "test:web": "vitest run"
+    "test:web": "vitest run",
+    "test:deconstruct": "pnpm --filter @akl/deconstruct-api test",
+    "setup:deconstruct": "pnpm --filter @akl/deconstruct-api browser:install"
   },
   "devDependencies": {
     "@types/node": "catalog:",

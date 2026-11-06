@@ -307,3 +307,72 @@ a {
 .loading-dots { display: inline-block; width: 1.5em; text-align: left; }
 @keyframes search-progress { from { transform: translateX(-100%); } to { transform: translateX(286%); } }
 @media (prefers-reduced-motion: reduce) { .loading-bar span { animation: none; margin: auto; } }
+
+.deconstruct-view { position: absolute; inset: 0; z-index: 10; overflow: hidden; background: #fff; outline: 0; touch-action: none; }
+.deconstruct-threads { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.deconstruct-renderer { position: absolute !important; inset: 0; z-index: 2; }
+.deconstruct-head { position: absolute; top: 20px; left: 50%; z-index: 4; width: min(70%, 820px); transform: translateX(-50%); text-align: center; pointer-events: none; }
+.deconstruct-head > * { pointer-events: auto; }
+.deconstruct-title { display: inline-block; max-width: 100%; margin: 0; overflow: hidden; background: #fff; font-size: 26px; white-space: nowrap; text-overflow: ellipsis; }
+.deconstruct-summary { width: fit-content; max-width: 100%; min-height: 1.4em; margin: 2px auto 0; overflow: hidden; background: #fff; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
+.deconstruct-modes { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 14px; width: fit-content; margin: 6px auto 0; background: #fff; font-size: 16px; }
+.deconstruct-modes button { padding: 0; border: 0; border-bottom: 1px solid transparent; background: none; font: inherit; cursor: pointer; }
+.deconstruct-modes button[aria-pressed=true] { border-bottom-color: #000; }
+.deconstruct-assemble { position: absolute; top: 24px; right: 24px; z-index: 4; padding: 0; border: 0; background: #fff; font: inherit; font-size: 20px; text-decoration: underline; cursor: pointer; }
+.deconstruct-density { position: absolute; right: 24px; bottom: 24px; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 2px 4px; background: #fff; font-size: 13px; }
+.deconstruct-density output { min-width: 3em; }
+.deconstruct-density input { width: 150px; margin: 0; accent-color: #000; touch-action: auto; }
+
+.deconstruct-fragment { position: absolute; box-sizing: border-box; color: #000; cursor: pointer; opacity: 0; transition: opacity .35s ease; --emphasis-opacity: 1; }
+.deconstruct-fragment.is-shown { opacity: var(--emphasis-opacity); }
+.deconstruct-view.has-active-fragment .deconstruct-fragment.is-shown:not(.is-near) { opacity: calc(var(--emphasis-opacity) * .16); }
+.deconstruct-view.has-active-fragment .deconstruct-fragment.is-near { opacity: 1; }
+.deconstruct-view.is-assembling .deconstruct-fragment.is-shown { opacity: 0; transition-duration: .42s; }
+.deconstruct-fragment.is-active p { color: #ff0000; }
+.deconstruct-fragment.is-active img { filter: drop-shadow(0 0 7px #ff0000); }
+.deconstruct-fragment:focus { outline: none; }
+.deconstruct-fragment:focus-visible p { text-decoration: underline; }
+.deconstruct-fragment p { display: -webkit-box; margin: 0; padding: 3px; overflow: hidden; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; }
+.deconstruct-fragment img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.deconstruct-fragment .deconstruct-missing { font-size: 12px; }
+.deconstruct-query-mark { position: absolute; max-width: 320px; padding: 4px; color: #ff0000; font-size: 34px; line-height: 1.2; text-align: center; opacity: 0; transition: opacity .4s ease; pointer-events: none; }
+.deconstruct-view.is-orbit .deconstruct-query-mark { opacity: 1; }
+
+.deconstruct-focus { position: absolute; bottom: 24px; left: 24px; z-index: 4; width: min(460px, calc(100% - 340px)); max-height: 50vh; padding: 10px; overflow-y: auto; border: 1px solid #000; background: #fff; user-select: text; -webkit-user-select: text; touch-action: auto; }
+.deconstruct-focus[hidden] { display: none; }
+.deconstruct-focus-content { margin: 0; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.deconstruct-focus-similarity { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+.deconstruct-focus-similarity:empty { display: none; }
+.deconstruct-focus-actions { display: flex; gap: 6px; margin-top: 10px; }
+.deconstruct-research, .deconstruct-break { flex: 1; padding: 6px 8px; border: 1px solid #000; font: inherit; font-size: 15px; cursor: pointer; }
+.deconstruct-research { background: #0000ff; color: #fff; }
+.deconstruct-break { background: #fff; color: #000; }
+.deconstruct-break:disabled { opacity: .5; cursor: default; }
+.deconstruct-research[hidden], .deconstruct-break[hidden] { display: none; }
+.deconstruct-phrase-status { margin: 8px 0 2px; font-size: 12px; }
+.deconstruct-phrase-status[hidden] { display: none; }
+.deconstruct-merge { display: block; width: 100%; margin-top: 6px; padding: 4px 8px; border: 1px solid #000; background: #fff; font: inherit; font-size: 14px; cursor: pointer; }
+.deconstruct-merge[hidden] { display: none; }
+.deconstruct-fragment.is-split { visibility: hidden; pointer-events: none; }
+.loading-cancel { margin-top: 12px; padding: 0; border: 0; background: none; font: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; }
+.loading-cancel[hidden] { display: none; }
+.deconstruct-depth { margin-left: 6px; padding: 0 6px !important; border: 1px solid #000 !important; }
+.deconstruct-depth[aria-pressed=true] { background: #000; color: #fff; }
+.deconstruct-focus-label { margin: 10px 0 2px; font-size: 12px; }
+.deconstruct-neighbors { margin: 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.6; }
+.deconstruct-neighbors button { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; font: inherit; text-align: left; white-space: pre; text-overflow: ellipsis; text-decoration: underline; cursor: pointer; }
+
+.decompose-status { display: block; margin-bottom: 4px; font-size: 14px; }
+.decompose-status[hidden] { display: none; }
+
+@media (max-width: 720px) {
+  .deconstruct-head { top: 52px; width: calc(100% - 24px); }
+  .deconstruct-title { font-size: 20px; }
+  .deconstruct-modes { font-size: 14px; }
+  .deconstruct-density { bottom: auto; top: 16px; right: auto; left: 16px; }
+  .deconstruct-assemble { top: 14px; right: 16px; }
+  .deconstruct-focus { left: 16px; bottom: 16px; width: calc(100% - 32px); max-height: 42vh; }
+}
+@media (prefers-reduced-motion: reduce) { .deconstruct-fragment { transition: none; } }
+/* Rotating 500 text layers should not re-rasterize them every frame. Flat views stay crisp without this. */
+.deconstruct-view.is-depth .deconstruct-fragment { will-change: transform; }

@@ -23,6 +23,7 @@ export interface MountBlankOptions {
   initialSeed?: number;
   search?: string;
   apiEndpoint?: string;
+  deconstructEndpoint?: string;
 }
 
 export interface BlankFrontendHandle extends MountHandle {
@@ -65,7 +66,7 @@ export function mountBlankFrontend(
   let generation = 0;
   const view = createFrontend(surface, scope, (query) => { void startRun({ query }); }, options.initialQuery ?? '', (nodeId) => { void continueSearch(nodeId); }, () => {
     activeStream?.abort(); activeStream = null; currentFixture = null; generation = 0;
-  });
+  }, options.deconstructEndpoint ?? (options.isolatedTest ? '' : '/deconstruct'));
   scope.add(session.subscribe((snapshot) => view.update(snapshot)));
 
   const bus = options.isolatedTest ? null : new LabBroadcastBus(`proto-${SLUG}-${crypto.randomUUID()}`);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -69,4 +70,36 @@ test('disconnecting a search cancels its upstream work', async t => {
   controller.abort();
   await assert.rejects(pending, { name: 'AbortError' });
   await aborted;
+});
+
+test('deconstruct proxy forwards only the public route and survives a stopped service', async t => {
+  const seen = [];
+  const upstream = createServer((request, response) => {
+    seen.push(request.url);
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ contents: [], weights: [] }));
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  const base = await listen(t, { deconstructOrigin: `http://127.0.0.1:${upstream.address().port}` });
+
+  const ok = await fetch(`${base}/deconstruct?url=${encodeURIComponent('https://example.com/?a=1')}`);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { contents: [], weights: [] });
+  assert.deepEqual(seen, ['/deconstruct?url=https%3A%2F%2Fexample.com%2F%3Fa%3D1']);
+
+  assert.equal((await fetch(`${base}/deconstruct/phrases?text=a`)).status, 200);
+  assert.equal(seen.pop(), '/deconstruct/phrases?text=a');
+  assert.equal((await fetch(`${base}/deconstruct?url=x`, { method: 'POST' })).status, 405);
+  for (const path of ['/health', '/debug/extract?url=x', '/deconstruct/../health']) {
+    assert.equal(seen.includes(path), false);
+    await fetch(base + path);
+  }
+  assert.deepEqual(seen, ['/deconstruct?url=https%3A%2F%2Fexample.com%2F%3Fa%3D1']);
+
+  const stopped = await listen(t, { deconstructOrigin: 'http://127.0.0.1:1' });
+  const failure = await fetch(`${stopped}/deconstruct?url=x`);
+  assert.equal(failure.status, 502);
+  assert.equal((await failure.json()).error.code, 'DECONSTRUCT_UNAVAILABLE');
 });
