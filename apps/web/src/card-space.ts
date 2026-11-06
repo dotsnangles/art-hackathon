@@ -183,13 +183,13 @@ export function createCardSpace(stage: HTMLElement, scope: DisposableScope, onSe
       element.dataset.stackId = placement.stack;
       if (page.group === 'original') {
         const marker = document.createElement('div'); marker.className = 'original-stack-marker';
-        marker.textContent = 'good';
+        marker.textContent = 'aligned';
         marker.setAttribute('aria-label', '정방향 스택'); face.prepend(marker);
       }
       if (page.group === 'drift') {
         const marker = document.createElement('div'); marker.className = 'original-stack-marker awesome-stack-marker';
         marker.dataset.level = String(page.relevanceLevel ?? 1);
-        marker.textContent = String(page.relevanceLevel ?? 1).padStart(2, '0');
+        marker.textContent = `${String(page.relevanceLevel ?? 1).padStart(2, '0')} skewed`;
         marker.setAttribute('aria-label', `연관도 ${marker.textContent}`); face.prepend(marker);
       }
       if (placement.branchFrom) element.dataset.branchFrom = placement.branchFrom;
