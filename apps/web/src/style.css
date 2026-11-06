@@ -257,7 +257,7 @@ a {
 .stack-stage { position: absolute; inset: 0; overflow: hidden; min-width: 0; }
 .stack-app > .history { position: absolute; inset: 0 0 0 auto; width: 280px; z-index: 5; background: transparent; }
 .stack-query { position: absolute; top: 24px; left: 0; width: 100%; text-align: center; z-index: 2; font-size: 26px; }
-.stack-query input { width: min(60%, 390px); border: 0; border-bottom: 1px solid #000; background: #fff; outline: 0; user-select: text; -webkit-user-select: text; }
+.stack-query input { width: min(60%, 390px); border: 0; border-bottom: 1px solid #000; background: transparent; outline: 0; user-select: text; -webkit-user-select: text; }
 .stack-query input::placeholder { opacity: .8; color: #000; font-size: 20px; }
 .stack-app[data-phase=entry] .history { display: none; }
 .stack-app[data-phase=entry] .stack-query { top: 45%; }

@@ -18,7 +18,7 @@ process.once('SIGTERM', () => { void close(); });
 
 try {
   const { port, options } = serverConfig();
-  api = createSearchServer(options);
+  api = createSearchServer({ ...options, searchLogger: console.log });
   await new Promise((resolve, reject) => {
     api.once('error', reject);
     api.listen(port, '127.0.0.1', resolve);

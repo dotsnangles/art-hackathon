@@ -349,6 +349,15 @@ export function createFrontend(
     openPagePreview(historyItem.dataset.nodeId);
   });
 
+  // Capture before card handlers so an outside click closes rather than reopening a card.
+  scope.trackListener(app, 'click', (event) => {
+    const target = event.target as Element;
+    if (preview.hidden || preview.contains(target) || detail.contains(target)) return;
+    closePreview(); detail.hidden = true; selectedId = null; space.back();
+    if (target.closest('[data-page-id]')) {
+      event.preventDefault(); event.stopPropagation();
+    }
+  }, { capture: true });
   scope.trackListener(container.querySelector('.return-to-search')!, 'click', () => {
     onReturnToSearch?.();
     setLoading(false);
