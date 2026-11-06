@@ -9,7 +9,28 @@ const COUNT_PARAMETERS = {
   awesomeCount: { defaultValue: 3, max: 100 },
   awesomeQueryCount: { defaultValue: 10, max: 20 },
 };
-const DEFAULT_DIRECTION = '원문을 출발점으로 분야·관점·맥락을 과감하게 넘나들며, 뒤로 갈수록 거의 다른 주제로 도약';
+export const AWESOME_DIRECTIONS = Object.freeze([
+  '생물의 적응·공생·기생을 출발점으로 원문을 재해석하고, 생명 밖의 뜻밖의 개념으로 도약하라.',
+  '먼 과거의 도구·의례·생활방식에서 원문의 낯선 대응물을 찾고, 잊힌 관습을 따라 도약하라.',
+  '원문이 사라지거나 완전히 쓸모없어진 미래를 상상하고, 그때 남을 현상과 기술로 도약하라.',
+  '원문의 목적과 수단, 원인과 결과를 뒤집고, 반대 원리로 작동하는 실제 사례로 도약하라.',
+  '원문의 실패·오류·고장·부작용을 출발점으로 삼아, 오작동이 새로운 기능이 되는 세계로 도약하라.',
+  '눈에 보이는 대상 대신 소리·촉각·냄새·맛·균형감각으로 원문을 옮기고, 감각 간 대응을 따라 도약하라.',
+  '원문을 미생물·세포·분자 수준으로 축소해 바라보고, 작은 규모에서만 드러나는 원리로 도약하라.',
+  '원문을 도시·행성·우주 규모로 확대해 바라보고, 거대한 규모에서 나타나는 현상으로 도약하라.',
+  '원문을 쓰레기·폐기물·잔해·부산물의 관점에서 바라보고, 버려진 것이 순환하는 경로로 도약하라.',
+  '원문 뒤에 숨은 운송·저장·배관·표준·유지보수에서 시작해, 보이지 않는 기반시설로 도약하라.',
+  '원문을 소유하는 자와 배제되는 자, 규칙과 통제의 관점에서 재해석하고, 권력의 작동 방식으로 도약하라.',
+  '원문을 선물·교환·빚·희소성의 관점에서 재해석하고, 뜻밖의 경제적 관습과 거래 방식으로 도약하라.',
+  '원문을 놀이·속임수·위장·모방의 관점에서 바라보고, 진짜와 가짜의 경계를 넘나들며 도약하라.',
+  '원문을 신화·금기·장례·통과의례의 관점에서 재해석하고, 서로 먼 문화의 실제 관습으로 도약하라.',
+  '원문을 확률·우연·잡음·예측 불가능성의 관점에서 바라보고, 통제가 무너질 때 생기는 현상으로 도약하라.',
+  '원문에서 경계·틈·문턱·접촉면을 찾아 출발하고, 서로 다른 세계가 만날 때 생기는 현상으로 도약하라.',
+  '원문을 리듬·주기·지연·동기화의 관점에서 재해석하고, 시간을 조직하는 뜻밖의 현상으로 도약하라.',
+  '원문을 기억·망각·흔적·복원의 관점에서 바라보고, 부재한 것이 남기는 실제 증거로 도약하라.',
+  '원문의 겉모습 대신 재료의 변형·마찰·균열·상전이를 따라가며, 물질의 성질이 바뀌는 지점으로 도약하라.',
+  '원문의 중심 대신 주변부·예외·소수 사례를 출발점으로 삼고, 통념을 깨는 실제 현상으로 도약하라.',
+]);
 const EMPTY_RESULTS_ERROR = "Google hasn't returned any results for this query.";
 
 function limitConcurrency(limit, signal) {
@@ -70,7 +91,7 @@ export async function search(query, {
   goodCount = COUNT_PARAMETERS.goodCount.defaultValue,
   awesomeCount = COUNT_PARAMETERS.awesomeCount.defaultValue,
   awesomeQueryCount = COUNT_PARAMETERS.awesomeQueryCount.defaultValue,
-  awesomeDirection = DEFAULT_DIRECTION,
+  awesomeDirection = '',
   fetchImpl = globalThis.fetch,
   timeoutMs = 120_000,
   signal: requestSignal,
@@ -130,7 +151,7 @@ export async function search(query, {
     if (!awesomeEnabled) return;
     const queries = await generateQueries(query, {
       llmProvider, anthropicApiKey, anthropicModel, openaiApiKey, openaiModel, awesomeQueryCount,
-      awesomeDirection: awesomeDirection.trim() || DEFAULT_DIRECTION,
+      awesomeDirection: awesomeDirection.trim() || AWESOME_DIRECTIONS[Math.floor(Math.random() * AWESOME_DIRECTIONS.length)],
       fetchImpl, signal,
     });
     signal.throwIfAborted();
@@ -232,40 +253,67 @@ async function serveFrontend(request, response, pathname, frontendDir) {
 }
 
 export function createSearchServer(options = {}) {
+  let nextRequestId = 0;
   return createServer(async (request, response) => {
+    let logResponse;
+    const send = (status, body, headers) => {
+      logResponse?.(status, body);
+      return json(response, status, body, headers);
+    };
     try {
       const url = new URL(request.url, 'http://localhost');
       if (url.pathname !== '/search' && options.frontendDir) {
         return await serveFrontend(request, response, url.pathname, options.frontendDir);
       }
       if (STATIC_FILES.has(url.pathname)) return await serveStatic(request, response, STATIC_FILES.get(url.pathname));
-      if (url.pathname !== '/search') return json(response, 404, { error: 'Not found' });
+      if (url.pathname !== '/search') return send(404, { error: 'Not found' });
+      if (options.searchLogger) {
+        const requestId = ++nextRequestId;
+        const startedAt = Date.now();
+        const parameters = Object.fromEntries(['query', 'awesomeDirection', ...Object.keys(COUNT_PARAMETERS)]
+          .filter((name) => url.searchParams.has(name))
+          .map((name) => [name, url.searchParams.get(name)]));
+        options.searchLogger(`[search #${requestId}] request ${JSON.stringify({ method: request.method, ...parameters })}`);
+        logResponse = (status, body) => {
+          const summary = status === 200 ? {
+            good: body.good.map(({ rank, title }) => ({ rank, title })),
+            awesome: Object.entries(body.awesome)
+              .sort(([, a], [, b]) => a.rank - b.rank)
+              .map(([query, { rank, results }]) => ({
+                query, rank, results: results.map(({ rank, title }) => ({ rank, title })),
+              })),
+          } : { error: body.error };
+          options.searchLogger(`[search #${requestId}] response ${JSON.stringify({
+            status, durationMs: Date.now() - startedAt, ...summary,
+          }, null, 2)}`);
+        };
+      }
       if (request.method !== 'GET') {
-        return json(response, 405, { error: 'Method not allowed' }, { Allow: 'GET' });
+        return send(405, { error: 'Method not allowed' }, { Allow: 'GET' });
       }
       const query = url.searchParams.get('query')?.trim();
-      if (!query) return json(response, 400, { error: 'query is required' });
+      if (!query) return send(400, { error: 'query is required' });
       const counts = {};
       for (const [name, { defaultValue, max }] of Object.entries(COUNT_PARAMETERS)) {
         const raw = url.searchParams.get(name);
         if (raw !== null && (!/^\d+$/.test(raw) || Number(raw) > max)) {
-          return json(response, 400, { error: name + ' must be an integer from 0 to ' + max });
+          return send(400, { error: name + ' must be an integer from 0 to ' + max });
         }
         counts[name] = raw === null ? defaultValue : Number(raw);
       }
-      const awesomeDirection = url.searchParams.get('awesomeDirection')?.trim() || DEFAULT_DIRECTION;
+      const awesomeDirection = url.searchParams.get('awesomeDirection')?.trim() || '';
       const controller = new AbortController();
       const abortRequest = () => { if (!response.writableEnded) controller.abort(); };
       response.once('close', abortRequest);
       try {
         const result = await search(query, { ...options, ...counts, awesomeDirection, signal: controller.signal });
-        if (!response.destroyed) json(response, 200, result);
+        if (!response.destroyed) send(200, result);
       } finally {
         response.removeListener('close', abortRequest);
       }
     } catch (error) {
       if (response.destroyed) return;
-      json(response, 502, {
+      send(502, {
         error: error instanceof QueryGenerationError ? error.message : 'SerpApi search failed',
       });
     }

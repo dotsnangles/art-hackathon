@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { createSearchServer, search } from './server.js';
+import { AWESOME_DIRECTIONS, createSearchServer, search } from './server.js';
 
 const apiKey = 'test-serp-key';
 const openaiApiKey = 'test-openai-key';
@@ -133,7 +133,8 @@ test('static serving is allowlisted and rejects unsupported methods', async (t) 
   assert.equal(mock.openaiCalls.length + mock.anthropicCalls.length + mock.serpCalls.length, 0);
 });
 
-test('defaults produce ten ranked query groups with three Google results each', async () => {
+test('defaults produce ten ranked query groups with three Google results each', async (t) => {
+  t.mock.method(Math, 'random', () => 0);
   const mock = mockUpstream();
   const result = await runSearch(mock);
   assert.equal(result.good.length, 30);
@@ -159,7 +160,7 @@ test('defaults produce ten ranked query groups with three Google results each', 
   assert.equal(call.body.model, 'gpt-6.1-sol');
   assert.equal(call.body.store, false);
   assert.deepEqual(JSON.parse(call.body.input), {
-    query: '인터랙티브 아트', direction: '원문을 출발점으로 분야·관점·맥락을 과감하게 넘나들며, 뒤로 갈수록 거의 다른 주제로 도약', count: 10,
+    query: '인터랙티브 아트', direction: AWESOME_DIRECTIONS[0], count: 10,
   });
   assert.match(call.body.instructions, /semantic similarity.*closest first/);
   assert.match(call.body.instructions, /first query should be relatively close/);
@@ -215,18 +216,106 @@ test('HTTP decodes and trims query and direction and applies per-query counts', 
   }
 });
 
-test('omitted, empty and whitespace-only directions use the same default', async (t) => {
+test('search logs correlate requests with ranked titles and omit document payloads', async (t) => {
+  const logs = [];
+  const queries = ['가까운 관점', '먼 관점'];
+  const mock = mockUpstream({
+    queries,
+    serp: (query) => ({ organic_results: rows(query).map((row, index) => ({ ...row, position: index + 7 })) }),
+  });
+  const base = await listen(t, { ...mock, searchLogger: (line) => logs.push(line) });
+  const params = new URLSearchParams({
+    query: '  아트 & design  ', awesomeDirection: '생물학 관점',
+    goodCount: '1', awesomeQueryCount: '2', awesomeCount: '1',
+    api_key: 'should-not-be-logged',
+  });
+  const response = await fetch(base + '/search?' + params);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(logs.length, 2);
+  assert.ok(logs[0].startsWith('[search #1] request '));
+  assert.deepEqual(JSON.parse(logs[0].slice('[search #1] request '.length)), {
+    method: 'GET', query: '  아트 & design  ', awesomeDirection: '생물학 관점',
+    goodCount: '1', awesomeCount: '1', awesomeQueryCount: '2',
+  });
+  assert.ok(logs[1].startsWith('[search #1] response '));
+  const summary = JSON.parse(logs[1].slice('[search #1] response '.length));
+  assert.equal(summary.status, 200);
+  assert.ok(Number.isFinite(summary.durationMs) && summary.durationMs >= 0);
+  assert.deepEqual(summary.good, [{ rank: 7, title: 'Title 1/0' }]);
+  assert.deepEqual(summary.awesome, queries.map((query, index) => ({
+    query, rank: index + 1, results: [{ rank: 7, title: 'Title 1/0' }],
+  })));
+  assert.ok(result.good[0].url && result.good[0].image && result.good[0].description);
+  assert.doesNotMatch(logs.join('\n'), /https?:|"(?:url|image|description)"|Description|should-not-be-logged|test-.*-key/);
+
+  await fetch(base + '/search?query=empty&goodCount=0&awesomeCount=0');
+  assert.ok(logs[2].startsWith('[search #2] request '));
+  assert.ok(logs[3].startsWith('[search #2] response '));
+  const empty = JSON.parse(logs[3].slice('[search #2] response '.length));
+  assert.deepEqual(empty.good, []);
+  assert.deepEqual(empty.awesome, []);
+});
+
+test('search logs contain safe validation and upstream errors, ignoring other routes', async (t) => {
+  const logs = [];
+  const mock = mockUpstream({ serp: () => { throw new Error('private upstream url and key'); } });
+  const base = await listen(t, { ...mock, searchLogger: (line) => logs.push(line) });
+  await fetch(base + '/missing');
+  assert.deepEqual(logs, []);
+  for (const [path, options, status, error] of [
+    ['/search', undefined, 400, 'query is required'],
+    ['/search?query=art', { method: 'POST' }, 405, 'Method not allowed'],
+    ['/search?query=art&awesomeCount=0', undefined, 502, 'SerpApi search failed'],
+  ]) {
+    const response = await fetch(base + path, options);
+    assert.equal(response.status, status);
+    const summary = JSON.parse(logs.at(-1).slice(logs.at(-1).indexOf('response ') + 9));
+    assert.equal(summary.status, status);
+    assert.equal(summary.error, error);
+  }
+  assert.doesNotMatch(logs.join('\n'), /private upstream|test-.*-key/);
+});
+
+test('search logging is disabled unless a logger is supplied', async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const base = await listen(t, mockUpstream());
+  const response = await fetch(base + '/search?query=art&goodCount=1&awesomeQueryCount=1&awesomeCount=1');
+  assert.equal(response.status, 200);
+  assert.equal(log.mock.callCount(), 0);
+});
+
+test('omitted, empty and whitespace-only directions select afresh while explicit directions bypass randomness', async (t) => {
+  const randomValues = [0, 0.5, 0.999999];
+  let randomCalls = 0;
+  t.mock.method(Math, 'random', () => randomValues[randomCalls++]);
   const mock = mockUpstream();
   const base = await listen(t, mock);
-  for (const suffix of ['', '&awesomeDirection=', '&awesomeDirection=%20%20']) {
+  for (const suffix of ['', '&awesomeDirection=', '&awesomeDirection=%20%20', '&awesomeDirection=%20custom%20']) {
     const response = await fetch(base + '/search?query=art&awesomeQueryCount=1' + suffix);
     assert.equal(response.status, 200);
   }
   assert.deepEqual(mock.openaiCalls.map(({ body }) => JSON.parse(body.input).direction), [
-    '원문을 출발점으로 분야·관점·맥락을 과감하게 넘나들며, 뒤로 갈수록 거의 다른 주제로 도약',
-    '원문을 출발점으로 분야·관점·맥락을 과감하게 넘나들며, 뒤로 갈수록 거의 다른 주제로 도약',
-    '원문을 출발점으로 분야·관점·맥락을 과감하게 넘나들며, 뒤로 갈수록 거의 다른 주제로 도약',
+    AWESOME_DIRECTIONS[0],
+    AWESOME_DIRECTIONS[10],
+    AWESOME_DIRECTIONS[19],
+    'custom',
   ]);
+  assert.equal(randomCalls, 3);
+});
+
+test('direct searches can select all twenty directions without changing the original query', async (t) => {
+  assert.equal(AWESOME_DIRECTIONS.length, 20);
+  assert.equal(new Set(AWESOME_DIRECTIONS).size, 20);
+  let index = 0;
+  t.mock.method(Math, 'random', () => (index + 0.5) / 20);
+  const mock = mockUpstream();
+  for (; index < 20; index++) {
+    await runSearch(mock, { goodCount: 0, awesomeQueryCount: 1 });
+  }
+  assert.deepEqual(mock.openaiCalls.map(({ body }) => JSON.parse(body.input)), AWESOME_DIRECTIONS.map((direction) => ({
+    query: '인터랙티브 아트', direction, count: 1,
+  })));
 });
 
 test('each omitted count defaults independently', async (t) => {
@@ -634,7 +723,8 @@ test('OpenAI startup requires the selected key and a valid port', () => {
   }
 });
 
-test('Claude is the default and generates the same ranked search response without an OpenAI key', async () => {
+test('Claude is the default and generates the same ranked search response without an OpenAI key', async (t) => {
+  t.mock.method(Math, 'random', () => 0);
   const mock = mockUpstream();
   const result = await search('인터랙티브 아트', { apiKey, anthropicApiKey, ...mock });
   assert.equal(result.good.length, 30);
@@ -654,7 +744,7 @@ test('Claude is the default and generates the same ranked search response withou
   assert.equal(body.max_tokens, 4096);
   assert.equal(body.messages[0].role, 'user');
   assert.deepEqual(JSON.parse(body.messages[0].content), {
-    query: '인터랙티브 아트', direction: '원문을 출발점으로 분야·관점·맥락을 과감하게 넘나들며, 뒤로 갈수록 거의 다른 주제로 도약', count: 10,
+    query: '인터랙티브 아트', direction: AWESOME_DIRECTIONS[0], count: 10,
   });
   assert.match(body.system, /semantic similarity.*closest first/);
   assert.match(body.system, /first query should be relatively close/);
