@@ -195,7 +195,7 @@ export function createDeconstructView(host: HTMLElement, options: DeconstructVie
   let depth = false;
   let selected: number | null = null;
   let hovered: number | null = null;
-  let threadAlpha = 0; let threadTarget = 0;
+  let threadAlpha = 0;
   let holdUntil: number | null = null;
   let clock = 0;
   let dirty = true;
@@ -449,8 +449,7 @@ export function createDeconstructView(host: HTMLElement, options: DeconstructVie
 
   const setMode = (next: Mode) => {
     if (assembling) return;
-    // Only the meaning view keeps related fragments close; elsewhere the threads span the page and tangle.
-    mode = next; holdUntil = null; threadTarget = next === 'meaning' ? 1 : .3;
+    mode = next; holdUntil = null;
     modes.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => {
       button.setAttribute('aria-pressed', String(button.dataset.mode === next));
     });
@@ -525,6 +524,9 @@ export function createDeconstructView(host: HTMLElement, options: DeconstructVie
       moving = true;
       billboard += (billboardTarget - billboard) * easingFor(3, dt);
     } else billboard = billboardTarget;
+    // Hidden only while the opening hold lasts, so anything that cancels the hold brings them back.
+    // Only the meaning view keeps related fragments close; elsewhere the threads span the page and tangle.
+    const threadTarget = assembling || holdUntil !== null ? 0 : mode === 'meaning' ? 1 : .3;
     if (Math.abs(threadTarget - threadAlpha) > .005) {
       moving = true;
       threadAlpha += (threadTarget - threadAlpha) * easingFor(2, dt);
@@ -631,13 +633,13 @@ export function createDeconstructView(host: HTMLElement, options: DeconstructVie
       view.style.visibility = ''; view.focus();
       clock = 0;
       if (reducedMotion) setMode('meaning');
-      else { setMode('reading'); threadTarget = 0; holdUntil = REVEAL_SPREAD_SECONDS + READING_HOLD_SECONDS; }
+      else { setMode('reading'); holdUntil = REVEAL_SPREAD_SECONDS + READING_HOLD_SECONDS; }
       // The camera opens on the whole page and eases in, so the default zoom reads as a gesture.
       fit(true); renderedDistance = distance; lookTarget.copy(destination);
       fit();
     },
     assemble() {
-      assembling = true; holdUntil = null; autoRotate = false; threadTarget = 0;
+      assembling = true; holdUntil = null; autoRotate = false;
       showFocus(null, false);
       for (const fragment of fragments) { fragment.target = { x: destination.x, y: destination.y, z: destination.z }; fragment.delay = 0; }
       view.classList.add('is-assembling');
