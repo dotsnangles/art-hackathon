@@ -449,6 +449,133 @@
   </div>
 </section>
 
+<!-- 작업 과정: 회의 길이는 녹음 파일 길이(초), 갈래는 팀 회의 기록의 집계 -->
+<style>
+  .ptl { margin-top: 26px; }
+  .ptl h3 { font-size: 18px; font-weight: 400; margin: 22px 0 8px; }
+  .ptl .row { display: grid; grid-template-columns: 44px 330px 1fr; gap: 12px; align-items: baseline; padding: 4px 0; border-top: 1px solid #000; font-size: 15.5px; }
+  .ptl .no { font-family: var(--mono); font-size: 13px; }
+  .ptl .track { display: flex; align-items: center; gap: 8px; align-self: center; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  .ptl .track i { display: block; height: 11px; background: #0000ff; }
+  .ptl .turn { color: var(--red); }
+  .ptl .night { display: grid; grid-template-columns: repeat(6, 1fr); border-top: 1px solid #000; margin-top: 2px; }
+  .ptl .night div { padding: 8px 8px 0 0; font-size: 14px; line-height: 1.35; }
+  .ptl .night b { display: block; font-family: var(--mono); font-size: 12.5px; font-weight: 400; color: var(--red); }
+  .pcmp { display: grid; grid-template-columns: 112px 1fr 1fr 1fr; margin-top: 26px; font-size: 16px; line-height: 1.42; }
+  .pcmp > div { padding: 10px 12px 12px 0; border-top: 1px solid #000; }
+  .pcmp .h { font-family: var(--mono); font-size: 13px; }
+  .pcmp .last { color: var(--blue); }
+  .pgrid { margin-top: 24px; font-size: 14.5px; }
+  .pgrid .gr { display: grid; grid-template-columns: 232px repeat(11, 30px) 1fr; align-items: center; border-top: 1px solid #ddd; min-height: 25px; }
+  .pgrid .gr.first { border-top: 1px solid #000; }
+  .pgrid .gh { font-family: var(--mono); font-size: 10.5px; text-align: center; }
+  .pgrid .gr > span { text-align: center; align-self: stretch; display: flex; align-items: center; justify-content: center; }
+  .pgrid .gr > span.t { justify-content: flex-start; }
+  .pgrid .gr > span.to { justify-content: flex-start; padding-left: 10px; font-size: 13.5px; }
+  .pgrid .d { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px; }
+  .pgrid .sep { box-shadow: inset 1px 0 0 #000; }
+  .plegend { display: flex; gap: 20px; margin-top: 18px; font-size: 14.5px; }
+  .plegend .d { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+</style>
+
+<section class="fig" id="process_timeline">
+  <h2>회의 녹음 11개, 14시간 46분</h2>
+  <div class="lead">막대는 녹음 길이입니다. <span class="red">붉은 글자</span>는 그 회의에서 일어난 변곡점입니다.</div>
+  <div class="ptl" id="ptl"></div>
+</section>
+
+<section class="fig" id="process_shift">
+  <h2>무엇이 어떻게 바뀌었나</h2>
+  <div class="pcmp" id="pcmp"></div>
+</section>
+
+<section class="fig" id="process_threads">
+  <h2>아이디어 갈래 23개</h2>
+  <div class="lead">어느 회의에서 나왔고 어디로 갔는지입니다.</div>
+  <div class="plegend">
+    <span><i class="d" style="background:#0000ff"></i>최종 핵심 4</span>
+    <span><i class="d" style="background:#ff9e4d"></i>방식·표현으로 반영 5</span>
+    <span><i class="d" style="background:#a8a8a8"></i>보류 13</span>
+    <span><i class="d" style="background:#ff0000"></i>제외 1</span>
+  </div>
+  <div class="pgrid" id="pgrid"></div>
+</section>
+
+<script>
+  // process_timeline
+  const fmtLen = (s) => { const h = Math.floor(s / 3600), m = Math.round(s % 3600 / 60); return h ? `${h}시간 ${m}분` : `${m}분`; };
+  const meetingRow = (m) => `<div class="row"><span class="no">${m.no}</span><span>${m.what}${m.turn ? ` <span class="turn">${m.turn}</span>` : ''}</span><span class="track"><i style="width:${Math.round(m.sec / 9514 * 330)}px"></i>${fmtLen(m.sec)}</span></div>`;
+  const day1 = [
+    { no: '01', sec: 4793, what: '취미로 자기소개, 공통분모 찾기' },
+    { no: '02', sec: 4270, what: '발제와 진행 방식 토론', turn: '입장 차이' },
+    { no: '03', sec: 2617, what: '자유 토론, 보간 너머' },
+    { no: '04', sec: 3437, what: 'jev 그래프, 주제 문장 해부', turn: '핵심 등장' },
+    { no: '05', sec: 914, what: '벗어남과 찾아감, 정리 방식 논의' },
+    { no: '06', sec: 300, what: '너무 빨리 정리하지 말자', turn: '속도 조절' },
+    { no: '07', sec: 7965, what: '경험 구조, jev와 사람의 대비', turn: '수렴' },
+  ];
+  const day2 = [
+    { no: '2-1', sec: 3272, what: '시안 공유, 순위 역순 제안', turn: '방향 전환' },
+    { no: '2-2', sec: 8250, what: '재귀 구조, 크릿, 페이지 해체', turn: '구조 합의' },
+    { no: '2-3', sec: 9514, what: '분해 스키마, 튀지 않는 결과', turn: '구현과 통합' },
+    { no: '2-4', sec: 7852, what: '통합 순서, 분해의 의미', turn: '첫 데모' },
+  ];
+  const nightly = [
+    ['21:45', '검색과 화면 첫 통합'], ['23:32', 'PR 1, 2<br>씬과 재해석 방향'], ['00:00', 'PR 3<br>원격 브라우저'],
+    ['00:57', 'PR 4<br>카드 라벨'], ['01:15', 'PR 6<br>분해'], ['01:19', 'PR 5<br>히스토리 레일'],
+  ];
+  document.getElementById('ptl').innerHTML =
+    `<h3>Day 1 · 11월 5일 · 6시간 45분</h3>${day1.map(meetingRow).join('')}` +
+    `<h3>Day 2 · 11월 6일 · 8시간 1분</h3>${day2.map(meetingRow).join('')}` +
+    `<h3>Day 2 밤부터 Day 3 새벽 · 합친 순서</h3><div class="night">${nightly.map(([t, w]) => `<div><b>${t}</b>${w}</div>`).join('')}</div>`;
+
+  // process_shift
+  const shift = [
+    ['벗어나는 방법', 'jev가 달리는 평균의 길 옆을 사람이 직접 걷기', '검색 순위를 뒤집어 뒤쪽 결과로 들어가기', 'LLM이 검색어를 네 단계로 재해석해 곁에 붙이기'],
+    ['노드', '미정. 유튜브, 음악, 고전 텍스트 후보', '검색 결과 사이트, 그 안의 글과 이미지 조각', '3D 카드, 열면 실제 페이지, 분해하면 글과 이미지 조각'],
+    ['jev', '작품의 주인공, 추천 엔진의 상징', '결과를 고르는 규칙 중 하나', '쓰지 않음'],
+    ['사람', 'jev와 같은 선택지에서 고르기', '튀는 결과를 누르고, 조각을 골라 다음 검색으로', '카드를 열고, 분해할지 이어 검색할지, 어느 조각을 고를지 정하기'],
+    ['루프', '없음. 둘이 나란히 달림', '결과가 다시 검색어가 됨', '카드 제목은 이어가기, 조각은 새 최초 검색어'],
+  ];
+  document.getElementById('pcmp').innerHTML =
+    '<div class="h"></div><div class="h">Day 1</div><div class="h">Day 2 오후</div><div class="h last">최종</div>' +
+    shift.map(([k, a, b, c]) => `<div class="h">${k}</div><div>${a}</div><div>${b}</div><div class="last">${c}</div>`).join('');
+
+  // process_threads: at은 회의 번호, 1–7은 Day 1, 8–11은 Day 2의 2-1부터 2-4
+  const COLORS = { final: '#0000ff', merge: '#ff9e4d', park: '#a8a8a8', drop: '#ff0000' };
+  const threads = [
+    ['검색어 재해석 (LLM)', [10, 11], 'final', 'skewed 카드'],
+    ['결과가 다시 검색어로', [9, 10, 11], 'final', '이어가기, 조각 재검색'],
+    ['페이지 해체, 임베딩', [9, 10, 11], 'final', '분해 화면'],
+    ['네트워크 데이터 시각화', [4, 7, 8, 9, 10, 11], 'final', '카드 스택, 유사도 보기'],
+    ['보간 너머, AI 압축 문제', [1, 3, 4, 9], 'merge', '문제의식의 근거'],
+    ['취향과 개성, 디깅', [5, 7, 8, 9, 10], 'merge', '문제의식'],
+    ['알고리즘 반대편, 뒤쪽 결과', [1, 4, 7, 8, 9, 10], 'merge', '재해석으로 이동'],
+    ['추천 기준 직접 고르기', [4, 7, 9], 'merge', '카드와 조각 선택'],
+    ['공통 질문에서 각자 MVP', [2, 5, 7, 8, 10, 11], 'merge', '각자 PR로 통합'],
+    ['순위 역순, 확률 뒤집기', [8, 9, 10], 'park', '최종 앱에서 뺌'],
+    ['선택 의탁 그래프 (jev)', [4, 7, 8, 9], 'park', '최종 앱에서 뺌'],
+    ['껍데기 페르소나', [4, 7, 8, 9, 10], 'park', '최종 앱에서 뺌'],
+    ['군집화', [9, 10, 11], 'park', '유사도 배치로 대체'],
+    ['불편함, 감정의 여운', [7, 9, 10], 'park', '결론 없음'],
+    ['플랫폼 카피 UI', [7], 'park', '보류'],
+    ['탄막, 떨어지는 선택지', [7], 'park', '보류'],
+    ['물리적 출력', [2, 7], 'park', '보류'],
+    ['카오스 속의 하모니', [2], 'park', '보류'],
+    ['기억하는 AI 검증', [5], 'park', '보류'],
+    ['사건 데이터 위의 궤적', [8], 'park', '보류'],
+    ['챗봇 인터페이스', [8], 'park', '보류'],
+    ['크롬 확장 형태', [9], 'park', '보류'],
+    ['취향 찾기 에이전트', [4], 'drop', '모델 시연처럼 보일 우려'],
+  ];
+  const colNames = ['01', '02', '03', '04', '05', '06', '07', '2-1', '2-2', '2-3', '2-4'];
+  const sepAt = (i) => (i === 0 || i === 7 ? ' sep' : '');
+  document.getElementById('pgrid').innerHTML =
+    `<div class="gr" style="border-top:0"><span class="t"></span>${colNames.map((n, i) => `<span class="gh${sepAt(i)}">${n}</span>`).join('')}<span class="to"></span></div>` +
+    threads.map(([t, at, s, to], r) => `<div class="gr${r === 0 ? ' first' : ''}"><span class="t">${t}</span>${colNames.map((_, i) =>
+      `<span class="${sepAt(i).trim()}">${at.includes(i + 1) ? `<i class="d" style="background:${COLORS[s]}"></i>` : ''}</span>`).join('')}<span class="to">${to}</span></div>`).join('');
+</script>
+
 <script>
   // search_counts: 카드 조립
   const card = (color) => `<div class="card"><i style="background:${color}"></i><b></b></div>`;
